@@ -46,6 +46,26 @@ const ideaBlueprintResponseSchema = z.object({
   ideas: z.array(ideaBlueprintSchema).min(3).max(5),
 });
 
+const ideaBlueprintWireSchema = z.object({
+  label: z.string().min(6).max(96),
+  summary: z.string().min(20),
+  edgeLabel: z.string().min(3).max(40),
+  edgeExplanation: z.string().min(12),
+  type: z.enum([
+    "inspiration",
+    "target_audience",
+    "technical_constraints",
+    "business_constraints",
+    "prior_art",
+    "open_questions",
+  ]),
+  details: nodeDetailsSchema,
+});
+
+const ideaBlueprintWireResponseSchema = z.object({
+  ideas: z.array(ideaBlueprintWireSchema).min(3).max(5),
+});
+
 const analysisSchema = z.object({
   challenges: z.array(z.string()).min(2).max(4),
   tensions: z
@@ -145,14 +165,39 @@ function cleanPhrase(value: string) {
   return value.replace(/\s+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").trim();
 }
 
-function normalizeIdeaBlueprintPayload(payload: z.infer<typeof ideaBlueprintResponseSchema>) {
+function fitWithinLimit(value: string, maxLength: number, sentence = false) {
+  const normalized = sentence ? cleanSentence(value) : cleanPhrase(value);
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  const candidate = normalized.slice(0, maxLength + 1);
+  const breakpoints = [candidate.lastIndexOf(". "), candidate.lastIndexOf("; "), candidate.lastIndexOf(", "), candidate.lastIndexOf(" ")];
+  const cutoff = breakpoints.find((index) => index >= Math.floor(maxLength * 0.6));
+  const shortened = (cutoff ?? maxLength) > 0 ? candidate.slice(0, cutoff ?? maxLength).trim() : candidate.slice(0, maxLength).trim();
+  const stripped = shortened.replace(/[,:;-\s]+$/, "").trim();
+
+  if (!sentence) {
+    return stripped.slice(0, maxLength);
+  }
+
+  if (!stripped) {
+    return normalized.slice(0, maxLength).trim();
+  }
+
+  const withPunctuation = /[.!?]$/.test(stripped) ? stripped : `${stripped}.`;
+  return withPunctuation.length <= maxLength ? withPunctuation : `${withPunctuation.slice(0, maxLength - 1).trimEnd()}.`;
+}
+
+function normalizeIdeaBlueprintPayload(payload: z.infer<typeof ideaBlueprintWireResponseSchema>) {
   return {
     ideas: payload.ideas.map((idea) => ({
       ...idea,
-      label: cleanPhrase(idea.label),
-      summary: cleanSentence(idea.summary),
-      edgeLabel: cleanPhrase(idea.edgeLabel),
-      edgeExplanation: cleanSentence(idea.edgeExplanation),
+      label: fitWithinLimit(idea.label, 64),
+      summary: fitWithinLimit(idea.summary, 240, true),
+      edgeLabel: fitWithinLimit(idea.edgeLabel, 24),
+      edgeExplanation: fitWithinLimit(idea.edgeExplanation, 180, true),
       details: {
         inspiration: idea.details.inspiration.map(cleanSentence),
         targetAudience: idea.details.targetAudience.map(cleanSentence),
@@ -172,69 +217,84 @@ async function generateStructured<T>({
   schema,
   instructions,
   input,
+  maxOutputTokens = 4000,
 }: {
   name: string;
   schema: z.ZodType<T>;
   instructions: string;
   input: string;
+  maxOutputTokens?: number;
 }) {
-  const response = await getClient().responses.parse({
-    model: env.openai.model(),
-    instructions,
-    input,
-    text: {
-      format: zodTextFormat(schema, name),
-      verbosity: "medium",
-    },
-    max_output_tokens: 4000,
-    truncation: "disabled",
-  });
+  let lastError: Error | null = null;
 
-  if (response.output_parsed) {
-    return schema.parse(response.output_parsed);
-  }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await getClient().responses.create({
+      model: env.openai.model(),
+      instructions,
+      input,
+      text: {
+        format: zodTextFormat(schema, name),
+        verbosity: attempt === 0 ? "medium" : "low",
+      },
+      max_output_tokens: maxOutputTokens + attempt * 2000,
+      truncation: "disabled",
+    });
 
-  const raw = response.output_text?.trim() ?? "";
-  if (raw) {
-    try {
-      const candidate = extractJsonCandidate(raw);
-      return schema.parse(JSON.parse(candidate));
-    } catch {
+    const raw = response.output_text?.trim() ?? "";
+
+    if (raw) {
       try {
-        const repairedCandidate = sanitizeJsonCandidate(extractJsonCandidate(raw));
-        return schema.parse(JSON.parse(repairedCandidate));
-      } catch {
-        throw new Error(
-          `OpenAI returned unparseable structured output for ${name}. First 300 chars: ${raw.slice(0, 300)}`,
-        );
+        const candidate = extractJsonCandidate(raw);
+        return schema.parse(JSON.parse(candidate));
+      } catch (error) {
+        try {
+          const repairedCandidate = sanitizeJsonCandidate(extractJsonCandidate(raw));
+          return schema.parse(JSON.parse(repairedCandidate));
+        } catch (repairError) {
+          const reason =
+            response.status === "incomplete"
+              ? `Response incomplete (${response.incomplete_details?.reason ?? "unknown reason"})`
+              : "Response completed with invalid JSON";
+          lastError =
+            repairError instanceof Error
+              ? new Error(`${reason} for ${name}: ${repairError.message}`)
+              : new Error(`${reason} for ${name}.`);
+        }
       }
-    }
-  }
+    } else {
+      let maybeRefusal: { refusal?: string } | null = null;
 
-  let maybeRefusal: { refusal?: string } | null = null;
+      for (const item of response.output) {
+        if (!("content" in item) || !Array.isArray(item.content)) {
+          continue;
+        }
 
-  for (const item of response.output) {
-    if (!("content" in item) || !Array.isArray(item.content)) {
-      continue;
-    }
+        for (const content of item.content) {
+          if (content.type === "refusal") {
+            maybeRefusal = content;
+            break;
+          }
+        }
 
-    for (const content of item.content) {
-      if (content.type === "refusal") {
-        maybeRefusal = content;
-        break;
+        if (maybeRefusal) {
+          break;
+        }
       }
-    }
 
-    if (maybeRefusal) {
-      break;
+      if (maybeRefusal && "refusal" in maybeRefusal) {
+        throw new Error(`OpenAI refused structured output for ${name}: ${String(maybeRefusal.refusal)}`);
+      }
+
+      lastError =
+        response.status === "incomplete"
+          ? new Error(
+              `OpenAI response was incomplete for ${name}: ${response.incomplete_details?.reason ?? "unknown reason"}`,
+            )
+          : new Error(`OpenAI returned no recoverable text payload for ${name}.`);
     }
   }
 
-  if (maybeRefusal && "refusal" in maybeRefusal) {
-    throw new Error(`OpenAI refused structured output for ${name}: ${String(maybeRefusal.refusal)}`);
-  }
-
-  throw new Error(`OpenAI returned no parsed output for ${name} and no recoverable text payload.`);
+  throw lastError ?? new Error(`OpenAI returned no parsed output for ${name} and no recoverable text payload.`);
 }
 
 export async function generateIdeaBlueprints({
@@ -273,13 +333,15 @@ export async function generateIdeaBlueprints({
     "Avoid repeating the seed verbatim in every label unless necessary.",
     "Avoid abstract labels like workspace, radar, bridge, scout, studio unless the concept truly requires them.",
     "Every summary, explanation, and sentence-style detail item must be complete and must not end mid-phrase.",
+    "Respect these hard limits: label <= 64 characters, summary <= 240 characters, edgeLabel <= 24 characters, edgeExplanation <= 180 characters.",
   ].join(" ");
 
   const parsed = await generateStructured({
     name: "idea_blueprints",
-    schema: ideaBlueprintResponseSchema,
+    schema: ideaBlueprintWireResponseSchema,
     instructions,
     input: prompt,
+    maxOutputTokens: 7000,
   });
 
   return ideaBlueprintResponseSchema.parse(normalizeIdeaBlueprintPayload(parsed));
