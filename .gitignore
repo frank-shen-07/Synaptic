@@ -1,0 +1,8 @@
+node_modules
+.next
+out
+.data
+.DS_Store
+npm-debug.log*
+.env
+.env.local

@@ -1,0 +1,71 @@
+@import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
+
+:root {
+  --background: #f3ede3;
+  --foreground: #0f172a;
+  --card: rgba(255, 252, 247, 0.82);
+  --card-strong: rgba(255, 248, 238, 0.94);
+  --line: rgba(15, 23, 42, 0.12);
+  --shadow: 0 24px 70px rgba(19, 26, 38, 0.12);
+  --seed: #0f766e;
+  --inspiration: #0f766e;
+  --target-audience: #2563eb;
+  --technical-constraints: #c2410c;
+  --business-constraints: #8b5cf6;
+  --risks-failure-modes: #dc2626;
+  --prior-art: #b45309;
+  --adjacent-analogies: #1d4ed8;
+  --open-questions: #475569;
+  --tensions: #be123c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 24%),
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.15), transparent 28%),
+    linear-gradient(180deg, #f4efe6 0%, #efe6d8 100%);
+  color: var(--foreground);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-body), Georgia, "Times New Roman", serif;
+  color: var(--foreground);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.glass-panel {
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: linear-gradient(180deg, rgba(255, 253, 249, 0.88), rgba(250, 244, 236, 0.74));
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px);
+}
+
+.graph-grid {
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.06) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.cluster-chip {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.7);
+}
