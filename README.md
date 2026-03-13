@@ -16,7 +16,9 @@ Synaptic is a full-stack Next.js MVP for one complete thinking session:
 - Next.js 16 + React 19 + TypeScript
 - Tailwind CSS 4
 - React Flow for the graph canvas
-- File-backed JSON persistence in `.data/sessions`
+- OpenAI Responses API + embeddings
+- Elasticsearch indexing and semantic search
+- Supabase persistence
 - Typed server-side graph/agent pipeline in `lib/agent`
 
 ## Architecture
@@ -30,19 +32,17 @@ The app follows the same shape as the requested system:
 5. Session persisted
 6. Graph re-rendered
 
-Current local adapters:
+Current service expectations:
 
-- Persistence uses local JSON files instead of Supabase
-- Crosscheck uses live DuckDuckGo HTML search plus GitHub repository search
-- The reasoning pipeline is deterministic/template-driven rather than calling an external LLM
-
-That keeps the demo runnable without external credentials while preserving a clean seam for swapping in:
-
-- Elastic Agent Builder / Elasticsearch retrieval
-- Supabase persistence
-- A hosted model provider for stricter AI generation
+- OpenAI for structured generation and embeddings
+- Elasticsearch for semantic search and idea/session indexing
+- Supabase for sessions, ideas, and edges
 
 ## Run
+
+1. Create `.env.local` from `.env.example`
+2. Apply [supabase/migrations/0001_synaptic.sql](/Users/frankshen/Documents/GitHub/Synaptic/supabase/migrations/0001_synaptic.sql) in Supabase
+3. Start the app
 
 ```bash
 npm install
@@ -64,6 +64,7 @@ npm run build
 - `app/session/[id]/page.tsx`: shareable thinking session route
 - `components/graph-workbench.tsx`: graph UI, expansion, crosscheck, export
 - `lib/graph/schema.ts`: graph/session schema
-- `lib/agent/engine.ts`: seed expansion, node expansion, critique, tension detection, one-pager generation
-- `lib/agent/search.ts`: live prior-art crosscheck
-- `lib/storage/sessions.ts`: local persistence
+- `lib/agent/engine.ts`: OpenAI-backed seed expansion, node expansion, critique, tension detection, one-pager generation
+- `lib/agent/search.ts`: Elasticsearch + web prior-art crosscheck
+- `lib/storage/sessions.ts`: Supabase persistence
+- `docs/architecture.md`: architecture and request-flow diagrams

@@ -11,7 +11,7 @@ export async function POST(_: Request, { params }: RouteProps) {
   try {
     const { id } = await params;
     const session = await loadSession(id);
-    const onePager = generateOnePager(session);
+    const onePager = await generateOnePager(session);
     await saveSession(session);
     return NextResponse.json({
       session,

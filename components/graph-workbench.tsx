@@ -11,15 +11,14 @@ import {
   useNodesState,
 } from "@xyflow/react";
 import { jsPDF } from "jspdf";
+import { ArrowRight, Copy, Download, Search, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { Copy, Download, Sparkles, Telescope } from "lucide-react";
 
 import { ThoughtNode } from "@/components/thought-node";
 import { buildFlowGraph } from "@/lib/graph/layout";
 import type { GraphNodeRecord, GraphSession } from "@/lib/graph/schema";
-import { titleCase } from "@/lib/utils";
 
 const nodeTypes = {
   thoughtNode: ThoughtNode,
@@ -28,6 +27,20 @@ const nodeTypes = {
 type GraphWorkbenchProps = {
   initialSession: GraphSession;
 };
+
+const detailSections: Array<{
+  key: keyof GraphNodeRecord["details"];
+  label: string;
+}> = [
+  { key: "inspiration", label: "Inspiration" },
+  { key: "targetAudience", label: "Target audience" },
+  { key: "technicalConstraints", label: "Technical constraints" },
+  { key: "businessConstraints", label: "Business constraints" },
+  { key: "risksFailureModes", label: "Risks / failure modes" },
+  { key: "adjacentAnalogies", label: "Adjacent analogies" },
+  { key: "openQuestions", label: "Open questions" },
+  { key: "tensions", label: "Tensions" },
+];
 
 function isGraphSession(payload: unknown): payload is GraphSession {
   return Boolean(
@@ -43,11 +56,13 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
   const pathname = usePathname();
   const [session, setSession] = useState(initialSession);
   const [selectedNodeId, setSelectedNodeId] = useState(initialSession.graph.nodes[0]?.id ?? null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const initialFlowGraph = buildFlowGraph(initialSession.graph.nodes, initialSession.graph.edges);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialFlowGraph.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialFlowGraph.edges);
+
   const selectedNode =
     session.graph.nodes.find((node) => node.id === selectedNodeId) ??
     session.graph.nodes.find((node) => node.type === "seed") ??
@@ -59,36 +74,37 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
     setEdges(updated.edges);
   }, [session, setEdges, setNodes]);
 
-  async function runExpand(mode: "deeper" | "wider") {
-    if (!selectedNode) {
-      return;
-    }
-
+  async function mutateSession(
+    endpoint: string,
+    body?: Record<string, string>,
+    fallbackMessage?: string,
+  ) {
     setNotice(null);
     startTransition(async () => {
       try {
-        const response = await fetch(`/api/sessions/${session.id}/expand`, {
+        const response = await fetch(endpoint, {
           method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            nodeId: selectedNode.id,
-            mode,
-          }),
+          headers: body
+            ? {
+                "content-type": "application/json",
+              }
+            : undefined,
+          body: body ? JSON.stringify(body) : undefined,
         });
 
         const payload = (await response.json()) as unknown;
 
         if (!response.ok || !isGraphSession(payload)) {
           const message =
-            payload && typeof payload === "object" && "error" in payload ? String(payload.error) : "Could not expand node.";
+            payload && typeof payload === "object" && "error" in payload
+              ? String(payload.error)
+              : fallbackMessage ?? "Request failed.";
           throw new Error(message);
         }
 
         setSession(payload);
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : "Could not expand node.");
+        setNotice(error instanceof Error ? error.message : fallbackMessage ?? "Request failed.");
       }
     });
   }
@@ -153,46 +169,46 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-5 px-4 py-4 md:px-6 md:py-6">
-      <header className="glass-panel flex flex-col gap-4 rounded-[2rem] p-5 md:flex-row md:items-center md:justify-between md:px-7">
-        <div>
-          <Link href="/" className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-            Synaptic
-          </Link>
-          <h1 className="mt-2 text-4xl leading-none text-slate-950 md:text-5xl" style={{ fontFamily: "var(--font-display)" }}>
-            {session.seed}
-          </h1>
-          <p className="mt-2 text-sm text-slate-700" style={{ fontFamily: "var(--font-body)" }}>
-            Originality {(session.insights.originalityScore * 100).toFixed(0)}% based on live crosscheck signals.
-          </p>
+      <header className="glass-panel rounded-[2rem] p-5 md:px-7 md:py-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <Link href="/" className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Synaptic
+            </Link>
+            <h1 className="mt-2 max-w-5xl text-4xl leading-none text-slate-950 md:text-5xl" style={{ fontFamily: "var(--font-display)" }}>
+              {session.seed}
+            </h1>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3" style={{ fontFamily: "var(--font-body)" }}>
+            <button
+              type="button"
+              onClick={generateBrief}
+              disabled={isPending}
+              className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:cursor-wait disabled:bg-slate-500"
+            >
+              <Sparkles className="h-4 w-4" />
+              Generate one-pager
+            </button>
+            <button
+              type="button"
+              onClick={copyShareLink}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-900/10 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800"
+            >
+              <Copy className="h-4 w-4" />
+              Copy share link
+            </button>
+            <button
+              type="button"
+              onClick={exportPdf}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-900/10 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800"
+            >
+              <Download className="h-4 w-4" />
+              Export PDF
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3" style={{ fontFamily: "var(--font-body)" }}>
-          <button
-            type="button"
-            onClick={generateBrief}
-            disabled={isPending}
-            className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:cursor-wait disabled:bg-slate-500"
-          >
-            <Sparkles className="h-4 w-4" />
-            Generate one-pager
-          </button>
-          <button
-            type="button"
-            onClick={copyShareLink}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-900/10 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800"
-          >
-            <Copy className="h-4 w-4" />
-            Copy share link
-          </button>
-          <button
-            type="button"
-            onClick={exportPdf}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-900/10 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800"
-          >
-            <Download className="h-4 w-4" />
-            Export PDF
-          </button>
-        </div>
       </header>
 
       {notice ? (
@@ -201,195 +217,171 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
         </div>
       ) : null}
 
-      <section className="grid min-h-[76vh] gap-5 xl:grid-cols-[1.6fr_0.8fr]">
-        <div className="glass-panel graph-grid relative overflow-hidden rounded-[2rem]">
-          <div className="absolute left-5 top-5 z-10 flex flex-wrap gap-2" style={{ fontFamily: "var(--font-body)" }}>
-            {[
-              "inspiration",
-              "target_audience",
-              "technical_constraints",
-              "business_constraints",
-              "risks_failure_modes",
-              "prior_art",
-              "adjacent_analogies",
-              "open_questions",
-              "tensions",
-            ].map((type) => (
-              <span key={type} className="cluster-chip rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">
-                {titleCase(type)}
-              </span>
-            ))}
-          </div>
-
-          <div className="h-[76vh] w-full">
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              fitView
-              fitViewOptions={{ padding: 0.18 }}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background color="rgba(15,23,42,0.08)" gap={28} />
-              <Controls />
-              <MiniMap
-                pannable
-                zoomable
-                maskColor="rgba(243,237,227,0.75)"
-                style={{
-                  backgroundColor: "rgba(255,255,255,0.8)",
-                  border: "1px solid rgba(15,23,42,0.08)",
-                }}
-              />
-            </ReactFlow>
-          </div>
+      <section className="glass-panel graph-grid relative overflow-hidden rounded-[2rem]">
+        <div className="absolute left-5 top-5 z-10 rounded-full border border-slate-900/10 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500" style={{ fontFamily: "var(--font-body)" }}>
+          Click a node to inspect it
         </div>
 
-        <aside className="grid gap-5">
-          <section className="glass-panel rounded-[2rem] p-5" style={{ fontFamily: "var(--font-body)" }}>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Selected Node</p>
-            {selectedNode ? (
-              <>
-                <h2 className="mt-3 text-3xl leading-tight text-slate-950" style={{ fontFamily: "var(--font-display)" }}>
+        <div className="h-[78vh] w-full">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.18 }}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onNodeClick={(_, node) => {
+              setSelectedNodeId(node.id);
+              setIsModalOpen(true);
+            }}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background color="rgba(15,23,42,0.07)" gap={28} />
+            <Controls />
+            <MiniMap
+              pannable
+              zoomable
+              maskColor="rgba(243,237,227,0.78)"
+              style={{
+                backgroundColor: "rgba(255,255,255,0.86)",
+                border: "1px solid rgba(15,23,42,0.08)",
+              }}
+            />
+          </ReactFlow>
+        </div>
+      </section>
+
+      {isModalOpen && selectedNode ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-8"
+          onClick={() => setIsModalOpen(false)}
+        >
+          <div
+            className="glass-panel max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-[2rem] p-6 md:p-7"
+            onClick={(event) => event.stopPropagation()}
+            style={{ fontFamily: "var(--font-body)" }}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                  {selectedNode.depth === 0 ? "Seed node" : `Depth ${selectedNode.depth} idea`}
+                </p>
+                <h2 className="mt-2 text-4xl leading-tight text-slate-950" style={{ fontFamily: "var(--font-display)" }}>
                   {selectedNode.label}
                 </h2>
-                <p className="mt-3 text-sm leading-6 text-slate-700">{selectedNode.summary}</p>
-                <div className="mt-4 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                  <span className="rounded-full border border-slate-900/10 px-3 py-1">
-                    {titleCase(selectedNode.type)}
-                  </span>
-                  <span className="rounded-full border border-slate-900/10 px-3 py-1">
-                    Confidence {(selectedNode.confidence * 100).toFixed(0)}%
-                  </span>
-                  {selectedNode.severity ? (
-                    <span className="rounded-full border border-rose-500/15 bg-rose-50 px-3 py-1 text-rose-700">
-                      {selectedNode.severity} severity
-                    </span>
-                  ) : null}
-                </div>
-                <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    disabled={!selectedNode.expandable || isPending}
-                    onClick={() => runExpand("deeper")}
-                    className="rounded-[1rem] bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
-                  >
-                    Expand deeper
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!selectedNode.expandable || isPending}
-                    onClick={() => runExpand("wider")}
-                    className="rounded-[1rem] border border-slate-900/10 bg-white/75 px-4 py-3 text-sm font-semibold text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
-                  >
-                    Expand wider
-                  </button>
-                </div>
-
-                {selectedNode.sourceUrls.length > 0 ? (
-                  <div className="mt-5 space-y-2 rounded-[1.2rem] border border-amber-700/10 bg-amber-50/80 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">Sources</p>
-                    {selectedNode.sourceUrls.map((sourceUrl) => (
-                      <a
-                        key={sourceUrl}
-                        href={sourceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block break-all text-sm leading-6 text-amber-900 underline decoration-amber-300 underline-offset-2"
-                      >
-                        {sourceUrl}
-                      </a>
-                    ))}
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <p className="mt-3 text-sm text-slate-600">Select a node to inspect it.</p>
-            )}
-          </section>
-
-          <section className="glass-panel rounded-[2rem] p-5" style={{ fontFamily: "var(--font-body)" }}>
-            <div className="flex items-center gap-2 text-slate-900">
-              <Telescope className="h-4 w-4" />
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Critique + Crosscheck</p>
+                <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-700">{selectedNode.summary}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="rounded-full border border-slate-900/10 bg-white/80 p-3 text-slate-700"
+                aria-label="Close node details"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
-            <div className="mt-4 space-y-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Devil&apos;s advocate</p>
-                <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
-                  {session.insights.challenges.map((challenge) => (
-                    <li key={challenge} className="rounded-[1rem] border border-red-700/10 bg-red-50/70 px-4 py-3">
-                      {challenge}
-                    </li>
-                  ))}
-                </ul>
-              </div>
 
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Prior art</p>
-                <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
-                  {session.insights.priorArt.map((hit) => (
-                    <li key={hit.id} className="rounded-[1rem] border border-amber-700/10 bg-amber-50/70 px-4 py-3">
-                      <a href={hit.url} target="_blank" rel="noreferrer" className="font-semibold underline decoration-amber-300 underline-offset-2">
-                        {hit.title}
-                      </a>
-                      <p className="mt-1 text-sm text-slate-700">{hit.snippet}</p>
-                      <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                        {hit.source} match {(hit.matchScore * 100).toFixed(0)}%
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+            <div className="mt-5 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">
+              <span className="rounded-full border border-slate-900/10 px-3 py-1">
+                {session.graph.nodes.filter((node) => node.parentId === selectedNode.id).length}/5 child ideas
+              </span>
+              {selectedNode.crosscheckedAt ? (
+                <span className="rounded-full border border-amber-700/10 bg-amber-50 px-3 py-1 text-amber-800">
+                  Cross-checked {new Date(selectedNode.crosscheckedAt).toLocaleString()}
+                </span>
+              ) : null}
             </div>
-          </section>
 
-          <section className="glass-panel rounded-[2rem] p-5" style={{ fontFamily: "var(--font-body)" }}>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Tensions + Export</p>
-            <div className="mt-4 space-y-4">
-              <div className="space-y-2">
-                {session.insights.tensions.map((tension) => (
-                  <div key={tension.id} className="rounded-[1rem] border border-rose-700/10 bg-rose-50/75 px-4 py-3">
-                    <p className="text-sm font-semibold text-rose-950">{tension.summary}</p>
-                    <p className="mt-1 text-sm leading-6 text-rose-900/80">{tension.explanation}</p>
-                  </div>
-                ))}
-              </div>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  mutateSession(
+                    `/api/sessions/${session.id}/expand`,
+                    { nodeId: selectedNode.id, mode: "deeper" },
+                    "Could not expand node.",
+                  )
+                }
+                disabled={!selectedNode.expandable || isPending}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+              >
+                Expand node
+                <ArrowRight className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  mutateSession(
+                    `/api/sessions/${session.id}/crosscheck`,
+                    { nodeId: selectedNode.id },
+                    "Could not cross-check node.",
+                  )
+                }
+                disabled={isPending}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-900/10 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-900 disabled:cursor-wait disabled:text-slate-400"
+              >
+                <Search className="h-4 w-4" />
+                Cross-check for existing similar ideas
+              </button>
+            </div>
 
-              {session.onePager ? (
-                <div className="rounded-[1.2rem] border border-slate-900/10 bg-white/80 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">One-pager preview</p>
-                  <h3 className="mt-3 text-xl text-slate-950" style={{ fontFamily: "var(--font-display)" }}>
-                    {session.onePager.title}
-                  </h3>
-                  <p className="mt-2 text-sm leading-6 text-slate-700">{session.onePager.hook}</p>
-                  <div className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Target user</p>
-                      <p>{session.onePager.targetUser}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">MVP path</p>
-                      <ol className="mt-1 list-decimal space-y-1 pl-4">
-                        {session.onePager.mvpPath.map((item) => (
-                          <li key={item}>{item}</li>
+            <div className="mt-8 grid gap-4 md:grid-cols-2">
+              {detailSections.map((section) => {
+                const values = selectedNode.details[section.key];
+
+                return (
+                  <section key={section.key} className="rounded-[1.5rem] border border-slate-900/10 bg-white/70 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{section.label}</p>
+                    {values.length === 0 ? (
+                      <p className="mt-3 text-sm leading-6 text-slate-500">No content yet.</p>
+                    ) : (
+                      <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
+                        {values.map((value) => (
+                          <li key={value} className="rounded-[1rem] bg-slate-50/85 px-3 py-2">
+                            {value}
+                          </li>
                         ))}
-                      </ol>
-                    </div>
-                  </div>
-                </div>
+                      </ul>
+                    )}
+                  </section>
+                );
+              })}
+            </div>
+
+            <section className="mt-6 rounded-[1.5rem] border border-slate-900/10 bg-white/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Cross-check results</p>
+              {selectedNode.priorArt.length === 0 ? (
+                <p className="mt-3 text-sm leading-6 text-slate-600">
+                  No similarity search has been run for this node yet.
+                </p>
               ) : (
-                <div className="rounded-[1.2rem] border border-dashed border-slate-900/12 bg-white/55 px-4 py-5 text-sm leading-6 text-slate-600">
-                  Generate the one-pager to package the current graph into a shareable brief and export it as PDF.
+                <div className="mt-3 space-y-3">
+                  {selectedNode.priorArt.map((hit) => (
+                    <a
+                      key={hit.id}
+                      href={hit.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-[1.2rem] border border-amber-700/10 bg-amber-50/75 px-4 py-3"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-semibold text-amber-950">{hit.title}</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-700">{hit.snippet}</p>
+                        </div>
+                        <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          {(hit.matchScore * 100).toFixed(0)}% match
+                        </span>
+                      </div>
+                    </a>
+                  ))}
                 </div>
               )}
-            </div>
-          </section>
-        </aside>
-      </section>
+            </section>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

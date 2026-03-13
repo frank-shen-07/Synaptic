@@ -13,6 +13,26 @@ export const clusterTypes = [
   "tensions",
 ] as const;
 
+export const nodeDetailsSchema = z.object({
+  inspiration: z.array(z.string()).max(5),
+  targetAudience: z.array(z.string()).max(5),
+  technicalConstraints: z.array(z.string()).max(5),
+  businessConstraints: z.array(z.string()).max(5),
+  risksFailureModes: z.array(z.string()).max(5),
+  adjacentAnalogies: z.array(z.string()).max(5),
+  openQuestions: z.array(z.string()).max(5),
+  tensions: z.array(z.string()).max(5),
+});
+
+export const priorArtHitSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  url: z.string().url(),
+  snippet: z.string(),
+  source: z.string(),
+  matchScore: z.number().min(0).max(1),
+});
+
 export const graphNodeSchema = z.object({
   id: z.string(),
   label: z.string(),
@@ -28,6 +48,19 @@ export const graphNodeSchema = z.object({
   sourceUrls: z.array(z.string().url()).default([]),
   severity: z.enum(["low", "medium", "high"]).nullable().default(null),
   generated: z.boolean().default(false),
+  details: nodeDetailsSchema.default({
+    inspiration: [],
+    targetAudience: [],
+    technicalConstraints: [],
+    businessConstraints: [],
+    risksFailureModes: [],
+    adjacentAnalogies: [],
+    openQuestions: [],
+    tensions: [],
+  }),
+  crosscheckQuery: z.string().nullable().default(null),
+  priorArt: z.array(priorArtHitSchema).default([]),
+  crosscheckedAt: z.string().nullable().default(null),
 });
 
 export const graphEdgeSchema = z.object({
@@ -38,15 +71,6 @@ export const graphEdgeSchema = z.object({
   explanation: z.string(),
   strength: z.number().min(0).max(1),
   highlighted: z.boolean().default(false),
-});
-
-export const priorArtHitSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  url: z.string().url(),
-  snippet: z.string(),
-  source: z.string(),
-  matchScore: z.number().min(0).max(1),
 });
 
 export const tensionSchema = z.object({
@@ -98,7 +122,12 @@ export const expandNodeInputSchema = z.object({
   mode: z.enum(["deeper", "wider"]).default("deeper"),
 });
 
+export const crosscheckNodeInputSchema = z.object({
+  nodeId: z.string(),
+});
+
 export type ClusterType = (typeof clusterTypes)[number];
+export type NodeDetails = z.infer<typeof nodeDetailsSchema>;
 export type GraphNodeRecord = z.infer<typeof graphNodeSchema>;
 export type GraphEdgeRecord = z.infer<typeof graphEdgeSchema>;
 export type PriorArtHit = z.infer<typeof priorArtHitSchema>;
@@ -107,3 +136,4 @@ export type OnePager = z.infer<typeof onePagerSchema>;
 export type GraphSession = z.infer<typeof graphSessionSchema>;
 export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
 export type ExpandNodeInput = z.infer<typeof expandNodeInputSchema>;
+export type CrosscheckNodeInput = z.infer<typeof crosscheckNodeInputSchema>;

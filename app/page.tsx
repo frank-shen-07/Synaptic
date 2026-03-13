@@ -80,9 +80,7 @@ export default async function HomePage() {
               href={`/session/${session.id}`}
               className="rounded-[1.6rem] border border-slate-900/10 bg-white/75 p-5 transition hover:-translate-y-0.5 hover:border-slate-900/20 hover:shadow-[0_18px_40px_rgba(15,23,42,0.09)]"
             >
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-                Originality {(session.insights.originalityScore * 100).toFixed(0)}%
-              </p>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Saved Session</p>
               <h3
                 className="mt-3 text-2xl leading-tight text-slate-950"
                 style={{ fontFamily: "var(--font-display)" }}

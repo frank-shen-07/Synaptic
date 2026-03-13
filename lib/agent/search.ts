@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 
+import { searchElasticSimilarIdeas } from "@/lib/integrations/elasticsearch";
 import { clamp } from "@/lib/utils";
 import type { PriorArtHit } from "@/lib/graph/schema";
 
@@ -99,13 +100,15 @@ async function searchGithub(query: string): Promise<PriorArtHit[]> {
   }));
 }
 
-export async function crosscheckIdea(query: string) {
-  const [webHits, githubHits] = await Promise.allSettled([
+export async function crosscheckIdea(query: string, excludeSessionId?: string) {
+  const [elasticHits, webHits, githubHits] = await Promise.allSettled([
+    searchElasticSimilarIdeas(query, excludeSessionId),
     searchDuckDuckGo(query),
     searchGithub(query),
   ]);
 
   const combined = [
+    ...(elasticHits.status === "fulfilled" ? elasticHits.value : []),
     ...(webHits.status === "fulfilled" ? webHits.value : []),
     ...(githubHits.status === "fulfilled" ? githubHits.value : []),
   ]

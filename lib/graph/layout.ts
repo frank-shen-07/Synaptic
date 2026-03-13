@@ -9,11 +9,9 @@ export type ThoughtNodeData = {
 type PositionedNode = Node<ThoughtNodeData, "thoughtNode">;
 type PositionedEdge = Edge<GraphEdgeRecord>;
 
-const topLevelRadii: Record<number, number> = {
-  0: 0,
-  1: 320,
-  2: 180,
-  3: 120,
+type Sector = {
+  start: number;
+  end: number;
 };
 
 function polarToCartesian(radius: number, angle: number) {
@@ -23,47 +21,80 @@ function polarToCartesian(radius: number, angle: number) {
   };
 }
 
+function getRadiusForDepth(depth: number) {
+  if (depth === 0) {
+    return 0;
+  }
+
+  return 260 + (depth - 1) * 210;
+}
+
+function getNodeSize(node: GraphNodeRecord) {
+  if (node.depth === 0) {
+    return 190;
+  }
+
+  return Math.max(116, Math.round(136 - node.depth * 10 + node.weight * 14));
+}
+
+function midpoint(sector: Sector) {
+  return (sector.start + sector.end) / 2;
+}
+
+function sectorForChildren(parentSector: Sector, total: number, index: number, depth: number): Sector {
+  const span = parentSector.end - parentSector.start;
+  const shrink = depth === 0 ? 1 : 0.62;
+  const usableSpan = span * shrink;
+  const center = midpoint(parentSector);
+  const start = center - usableSpan / 2;
+  const step = usableSpan / Math.max(total, 1);
+
+  return {
+    start: start + index * step,
+    end: start + (index + 1) * step,
+  };
+}
+
 export function buildFlowGraph(
   nodes: GraphNodeRecord[],
   edges: GraphEdgeRecord[],
 ): { nodes: PositionedNode[]; edges: PositionedEdge[] } {
   const children = new Map<string, GraphNodeRecord[]>();
-  const inbound = new Map<string, GraphEdgeRecord[]>();
-
-  for (const edge of edges) {
-    const targetEdges = inbound.get(edge.target) ?? [];
-    targetEdges.push(edge);
-    inbound.set(edge.target, targetEdges);
-  }
 
   for (const node of nodes) {
     if (!node.parentId) {
       continue;
     }
 
-    const siblingList = children.get(node.parentId) ?? [];
-    siblingList.push(node);
-    children.set(node.parentId, siblingList);
+    const current = children.get(node.parentId) ?? [];
+    current.push(node);
+    children.set(node.parentId, current);
   }
 
-  const positioned = new Map<string, PositionedNode>();
   const seedNode = nodes.find((node) => node.type === "seed");
 
   if (!seedNode) {
     return { nodes: [], edges: [] };
   }
 
+  const positioned = new Map<string, PositionedNode>();
+  const rootSize = getNodeSize(seedNode);
   positioned.set(seedNode.id, {
     id: seedNode.id,
     type: "thoughtNode",
-    data: {
-      record: seedNode,
+    data: { record: seedNode },
+    position: { x: -rootSize / 2, y: -rootSize / 2 },
+    style: {
+      width: rootSize,
+      height: rootSize,
     },
-    position: { x: 0, y: 0 },
   });
 
-  const queue: Array<{ node: GraphNodeRecord; parentPosition: { x: number; y: number } }> = [
-    { node: seedNode, parentPosition: { x: 0, y: 0 } },
+  const queue: Array<{ node: GraphNodeRecord; sector: Sector }> = [
+    {
+      node: seedNode,
+      sector: { start: -Math.PI, end: Math.PI },
+    },
   ];
 
   while (queue.length > 0) {
@@ -81,29 +112,31 @@ export function buildFlowGraph(
       continue;
     }
 
-    const radius = topLevelRadii[current.node.depth + 1] ?? 90;
-    const spread = current.node.depth === 0 ? Math.PI * 2 : Math.PI * 1.4;
-    const offset = current.node.depth === 0 ? -Math.PI / 2 : -spread / 2;
-
     currentChildren.forEach((child, index) => {
-      const normalized = currentChildren.length === 1 ? 0.5 : index / (currentChildren.length - 1);
-      const angle = offset + normalized * spread + child.depth * 0.18;
-      const spiral = polarToCartesian(radius + index * 16, angle);
-      const position = {
-        x: current.parentPosition.x + spiral.x,
-        y: current.parentPosition.y + spiral.y,
-      };
+      const childSector = sectorForChildren(current.sector, currentChildren.length, index, current.node.depth);
+      const angle = midpoint(childSector);
+      const radius = getRadiusForDepth(child.depth);
+      const point = polarToCartesian(radius, angle);
+      const size = getNodeSize(child);
 
       positioned.set(child.id, {
         id: child.id,
         type: "thoughtNode",
-        data: {
-          record: child,
+        data: { record: child },
+        position: {
+          x: point.x - size / 2,
+          y: point.y - size / 2,
         },
-        position,
+        style: {
+          width: size,
+          height: size,
+        },
       });
 
-      queue.push({ node: child, parentPosition: position });
+      queue.push({
+        node: child,
+        sector: childSector,
+      });
     });
   }
 
@@ -126,15 +159,15 @@ export function buildFlowGraph(
       fontWeight: 700,
     },
     labelBgStyle: {
-      fill: "#fff9f0",
-      fillOpacity: 0.95,
-      stroke: edge.highlighted ? "#be123c" : "#d6cabb",
+      fill: "#fffdf9",
+      fillOpacity: 0.96,
+      stroke: edge.highlighted ? "#be123c" : "#d4cdc3",
       strokeWidth: 1,
     },
     labelBgPadding: [6, 3],
     style: {
-      stroke: edge.highlighted ? "#be123c" : "#6b7280",
-      strokeWidth: edge.highlighted ? 2.2 : 1.2,
+      stroke: edge.highlighted ? "#be123c" : "#7b8794",
+      strokeWidth: edge.highlighted ? 2.1 : 1.3,
     },
   }));
 
