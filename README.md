@@ -1,47 +1,87 @@
 # Synaptic
 
-Synaptic is a full-stack Next.js MVP for one complete thinking session:
+Synaptic is a full-stack idea exploration app. A user enters one seed idea, gets a graph of AI-generated directions, clicks into any node to inspect a structured dossier, runs cross-checks against indexed ideas and external sources, and exports the session as a one-pager.
 
-- enter one seed idea
-- generate a structured thought graph
-- expand nodes deeper or wider
-- label relationships between nodes
-- run devil's-advocate critique
-- crosscheck live prior art from web and GitHub search
-- surface tensions/conflicts
-- export a one-pager as PDF
+## Current product behavior
+
+- Start with one seed idea
+- Generate up to 5 top-level idea nodes
+- Expand a node into up to 5 child ideas
+- Render idea nodes as a clean circular graph
+- Open a modal on node click for full idea details
+- Run cross-check on demand from the node modal
+- Export a one-pager PDF
+- Persist sessions, ideas, and edges in Supabase
+- Index sessions and ideas in Elasticsearch
 
 ## Stack
 
-- Next.js 16 + React 19 + TypeScript
+- Next.js 16
+- React 19
+- TypeScript
 - Tailwind CSS 4
-- React Flow for the graph canvas
-- OpenAI Responses API + embeddings
-- Elasticsearch indexing and semantic search
-- Supabase persistence
-- Typed server-side graph/agent pipeline in `lib/agent`
+- React Flow
+- OpenAI Responses API for structured generation
+- OpenAI embeddings for vector search
+- Elasticsearch for indexing and similarity retrieval
+- Supabase for canonical persistence
 
 ## Architecture
 
-The app follows the same shape as the requested system:
+The runtime split is:
 
-1. Frontend action
-2. API route
-3. Server-side typed tool/agent operation
-4. Structured graph JSON returned
-5. Session persisted
-6. Graph re-rendered
+- OpenAI
+  - idea generation
+  - node expansion
+  - critique / tension analysis
+  - one-pager generation
+  - embeddings
 
-Current service expectations:
+- Elasticsearch
+  - index session summaries
+  - index individual idea nodes
+  - semantic similarity search for cross-check
 
-- OpenAI for structured generation and embeddings
-- Elasticsearch for semantic search and idea/session indexing
-- Supabase for sessions, ideas, and edges
+- Supabase
+  - source of truth for sessions
+  - normalized storage for ideas and edges
+  - resumable / shareable sessions
 
-## Run
+Diagram assets:
 
-1. Create `.env.local` from `.env.example`
-2. Apply [supabase/migrations/0001_synaptic.sql](/Users/frankshen/Documents/GitHub/Synaptic/supabase/migrations/0001_synaptic.sql) in Supabase
+- [Architecture doc](/Users/frankshen/Documents/GitHub/Synaptic/docs/architecture.md)
+- [Architecture SVG](/Users/frankshen/Documents/GitHub/Synaptic/docs/architecture.svg)
+
+## Environment
+
+Create a `.env` file
+
+Required variables:
+
+```bash
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+
+ELASTICSEARCH_URL=
+ELASTICSEARCH_API_KEY=
+ELASTICSEARCH_SESSION_INDEX=synaptic-sessions
+ELASTICSEARCH_IDEA_INDEX=synaptic-ideas
+
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+Recommended:
+
+- Use `gpt-5-mini` for generation
+- Keep `text-embedding-3-small` for embeddings
+- Do not use `SUPABASE_SERVICE_ROLE_KEY` in client-side code
+
+## Setup
+
+1. Install dependencies
+2. Create `.env`
 3. Start the app
 
 ```bash
@@ -58,13 +98,23 @@ npm run lint
 npm run build
 ```
 
-## Key Files
+## Important notes
 
-- `app/page.tsx`: landing page and session launcher
-- `app/session/[id]/page.tsx`: shareable thinking session route
-- `components/graph-workbench.tsx`: graph UI, expansion, crosscheck, export
-- `lib/graph/schema.ts`: graph/session schema
-- `lib/agent/engine.ts`: OpenAI-backed seed expansion, node expansion, critique, tension detection, one-pager generation
-- `lib/agent/search.ts`: Elasticsearch + web prior-art crosscheck
-- `lib/storage/sessions.ts`: Supabase persistence
-- `docs/architecture.md`: architecture and request-flow diagrams
+- Existing saved sessions keep the content they were generated with. Improvements to generation affect new sessions and new expansions.
+- Cross-check is on-demand from the node modal, not automatic on initial graph generation.
+- If OpenAI returns brittle or low-quality structured output, switch to a stronger generation model before debugging the parser.
+
+## Key files
+
+- [app/page.tsx](/Users/frankshen/Documents/GitHub/Synaptic/app/page.tsx): landing page and session launcher
+- [app/session/[id]/page.tsx](/Users/frankshen/Documents/GitHub/Synaptic/app/session/[id]/page.tsx): shareable session route
+- [components/graph-workbench.tsx](/Users/frankshen/Documents/GitHub/Synaptic/components/graph-workbench.tsx): main graph UI and node modal
+- [components/thought-node.tsx](/Users/frankshen/Documents/GitHub/Synaptic/components/thought-node.tsx): circular node renderer
+- [lib/agent/engine.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/agent/engine.ts): session orchestration
+- [lib/agent/search.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/agent/search.ts): cross-check search pipeline
+- [lib/integrations/openai.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/integrations/openai.ts): OpenAI generation and embeddings
+- [lib/integrations/elasticsearch.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/integrations/elasticsearch.ts): Elastic indexing and retrieval
+- [lib/integrations/supabase.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/integrations/supabase.ts): Supabase admin client
+- [lib/storage/sessions.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/storage/sessions.ts): Supabase persistence layer
+- [lib/graph/schema.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/graph/schema.ts): graph/session schema
+- [lib/graph/layout.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/graph/layout.ts): graph layout
