@@ -1,11 +1,10 @@
 import { ArrowRight, FileText, GitBranch, Search, ShieldAlert, Sparkles } from "lucide-react";
 import { DM_Mono, Instrument_Serif, Libre_Baskerville } from "next/font/google";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
-import { AccountBar } from "@/components/account-bar";
 import { LandingSessionCta } from "@/components/landing-session-cta";
 import { getAuthenticatedUser } from "@/lib/integrations/supabase-server";
-import { listSessions } from "@/lib/storage/sessions";
 
 const display = Instrument_Serif({
   subsets: ["latin"],
@@ -233,7 +232,12 @@ function GraphPreview() {
 
 export default async function HomePage() {
   const user = await getAuthenticatedUser();
-  const sessions = user ? await listSessions(user.id) : [];
+
+  if (user) {
+    redirect("/workspace");
+  }
+
+  const workspaceHref = "/auth?next=/workspace";
 
   return (
     <main
@@ -272,23 +276,17 @@ export default async function HomePage() {
           </div>
 
           <Link
-            href={user ? "#start" : "/auth"}
+            href={workspaceHref}
             className="rounded-full border px-5 py-2 text-[0.68rem] uppercase tracking-[0.14em] transition hover:bg-[#efeae3]"
             style={{
               fontFamily: "var(--font-landing-mono)",
               borderColor: "rgba(22,17,11,0.1)",
             }}
           >
-            {user ? "Start Session ->" : "Sign In ->"}
+            Sign In -&gt;
           </Link>
         </div>
       </nav>
-
-      {user ? (
-        <div className="mx-auto w-full max-w-[1200px] px-6 pt-6 md:px-10">
-          <AccountBar email={user.email ?? "Signed in"} />
-        </div>
-      ) : null}
 
       <section className="mx-auto grid w-full max-w-[1200px] gap-16 px-6 pb-16 pt-24 md:grid-cols-2 md:px-10 md:pb-20 md:pt-24">
         <div>
@@ -321,7 +319,7 @@ export default async function HomePage() {
 
           <div className="mt-10 flex flex-wrap gap-3">
             <Link
-              href={user ? "#start" : "/auth"}
+              href={workspaceHref}
               className="inline-flex items-center gap-2 rounded-full border px-7 py-3 text-[0.72rem] uppercase tracking-[0.14em] transition hover:-translate-y-0.5"
               style={{
                 fontFamily: "var(--font-landing-mono)",
@@ -330,7 +328,7 @@ export default async function HomePage() {
                 color: "#f5f2ee",
               }}
             >
-              {user ? "Plant a seed idea ->" : "Sign in to start ->"}
+              Sign in to start -&gt;
             </Link>
             <a
               href="#how"
@@ -514,56 +512,10 @@ export default async function HomePage() {
             Enter a seed below and Synaptic will expand it into a structured graph ready to explore, critique, and export.
           </p>
           <div className="mt-8">
-            <LandingSessionCta signedIn={Boolean(user)} />
+            <LandingSessionCta signedIn={false} />
           </div>
         </div>
       </section>
-
-      {user ? (
-        <section className="mx-auto w-full max-w-[1200px] border-t px-6 pb-24 pt-20 md:px-10" style={{ borderColor: "rgba(22,17,11,0.1)" }}>
-          <div className="mb-8 flex flex-wrap items-end justify-between gap-6">
-            <div>
-              <SectionLabel>Workspace</SectionLabel>
-              <h2 className="text-[clamp(1.9rem,3.2vw,2.8rem)] leading-[1.08] tracking-[-0.03em]" style={{ fontFamily: "var(--font-landing-display)" }}>
-                Resume a <em className="italic text-[#3d3830]">saved session</em>
-              </h2>
-            </div>
-            <p className="max-w-[360px] text-sm leading-7 text-[#8a8278]" style={{ fontFamily: "var(--font-landing-body)" }}>
-              Sessions are private to your authenticated account and reopen exactly where you left them.
-            </p>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {sessions.length === 0 ? (
-              <div className="rounded-[1.2rem] border border-dashed bg-[#efeae3] p-6 text-sm text-[#8a8278]" style={{ borderColor: "rgba(22,17,11,0.1)" }}>
-                No sessions yet. Start with one seed idea above.
-              </div>
-            ) : null}
-
-            {sessions.map((session) => (
-              <Link
-                key={session.id}
-                href={`/session/${session.id}`}
-                className="rounded-[1.2rem] border bg-[#efeae3] p-6 transition hover:-translate-y-0.5 hover:shadow-[0_12px_30px_rgba(22,17,11,0.07)]"
-                style={{ borderColor: "rgba(22,17,11,0.1)" }}
-              >
-                <p className="text-[0.62rem] uppercase tracking-[0.18em] text-[#8a8278]" style={{ fontFamily: "var(--font-landing-mono)" }}>
-                  Saved Session
-                </p>
-                <h3 className="mt-3 text-[1.8rem] leading-tight tracking-[-0.03em]" style={{ fontFamily: "var(--font-landing-display)" }}>
-                  {session.seed}
-                </h3>
-                <p className="mt-4 line-clamp-3 text-[0.85rem] leading-[1.8] text-[#8a8278]" style={{ fontFamily: "var(--font-landing-body)" }}>
-                  {session.onePager?.hook ?? session.graph.nodes.find((node) => node.type === "seed")?.summary}
-                </p>
-                <p className="mt-5 text-[0.62rem] uppercase tracking-[0.18em] text-[#8a8278]" style={{ fontFamily: "var(--font-landing-mono)" }}>
-                  Updated {new Date(session.updatedAt).toLocaleString()}
-                </p>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       <footer
         className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-between gap-4 border-t px-6 py-8 md:px-10"
