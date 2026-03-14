@@ -23,6 +23,7 @@ Synaptic is a full-stack idea exploration app. A user enters one seed idea, gets
 - TypeScript
 - Tailwind CSS 4
 - React Flow
+- D3
 - OpenAI Responses API for structured generation
 - Exa for web and paper search
 - Serper patents for patent lookup
@@ -97,6 +98,15 @@ Recommended:
 ```bash
 npm install
 npm run dev
+```
+
+`npm install` will pull in the graph renderer dependencies, including `d3` and the TypeScript dev types for it.
+
+If you are adding them manually for any reason:
+
+```bash
+npm install d3
+npm install -D @types/d3
 ```
 
 Open `http://localhost:3000`.

@@ -39,11 +39,14 @@ function TypewriterLoader() {
 
   return (
     <div className="flex min-h-[180px] flex-col items-center justify-center gap-3" style={{ fontFamily: "var(--font-body)" }}>
-      <p className="text-lg font-semibold text-slate-800">
+      <p className="text-lg font-semibold text-[var(--foreground)]">
         {displayed}
-        <span className="ml-0.5 inline-block w-0.5 animate-pulse bg-slate-800 align-middle" style={{ height: "1.1em" }} />
+        <span
+          className="ml-0.5 inline-block w-0.5 animate-pulse bg-[var(--foreground)] align-middle"
+          style={{ height: "1.1em" }}
+        />
       </p>
-      <p className="text-xs uppercase tracking-[0.22em] text-slate-400">This may take a moment</p>
+      <p className="text-xs uppercase tracking-[0.22em] text-[var(--foreground-soft)]">This may take a moment</p>
     </div>
   );
 }
@@ -92,24 +95,24 @@ export function CreateSessionForm() {
   return (
     <form className="space-y-4" onSubmit={handleSubmit} style={{ fontFamily: "var(--font-body)" }}>
       <label className="block">
-        <span className="mb-2 block text-sm font-semibold text-slate-700">Seed idea</span>
+        <span className="mb-2 block text-sm font-semibold text-[var(--foreground-muted)]">Seed idea</span>
         <textarea
           required
           rows={5}
           value={seed}
           onChange={(event) => setSeed(event.target.value)}
           placeholder="An AI workspace where a founder enters one startup idea and explores tensions, competitors, and adjacent inspiration as a zoomable graph."
-          className="w-full rounded-[1.4rem] border border-slate-900/10 bg-white/85 px-4 py-3 text-base outline-none transition placeholder:text-slate-400 focus:border-slate-900/25 focus:ring-4 focus:ring-slate-900/5"
+          className="w-full rounded-[1.4rem] border border-[color:var(--line)] bg-[var(--button-secondary)] px-4 py-3 text-base text-[var(--foreground)] outline-none transition placeholder:text-[var(--foreground-soft)] focus:border-[color:var(--line-strong)] focus:ring-4 focus:ring-[color:var(--line)]/30"
         />
       </label>
 
       <label className="block">
-        <span className="mb-2 block text-sm font-semibold text-slate-700">Domain (optional)</span>
+        <span className="mb-2 block text-sm font-semibold text-[var(--foreground-muted)]">Domain (optional)</span>
         <input
           value={domain}
           onChange={(event) => setDomain(event.target.value)}
           placeholder="SaaS, biotech, climate, fintech..."
-          className="w-full rounded-[999px] border border-slate-900/10 bg-white/85 px-4 py-3 text-base outline-none transition placeholder:text-slate-400 focus:border-slate-900/25 focus:ring-4 focus:ring-slate-900/5"
+          className="w-full rounded-[999px] border border-[color:var(--line)] bg-[var(--button-secondary)] px-4 py-3 text-base text-[var(--foreground)] outline-none transition placeholder:text-[var(--foreground-soft)] focus:border-[color:var(--line-strong)] focus:ring-4 focus:ring-[color:var(--line)]/30"
         />
       </label>
 
@@ -118,7 +121,7 @@ export function CreateSessionForm() {
       <button
         type="submit"
         disabled={isPending}
-        className="inline-flex w-full items-center justify-center rounded-[999px] bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-wait disabled:bg-slate-500"
+        className="inline-flex w-full items-center justify-center rounded-[999px] bg-[var(--button-primary)] px-5 py-3 text-sm font-semibold text-[var(--button-primary-text)] transition hover:bg-[var(--button-primary-hover)] disabled:cursor-wait disabled:opacity-60"
       >
         {isPending ? "Generating graph..." : "Generate thought graph"}
       </button>

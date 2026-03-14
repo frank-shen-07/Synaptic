@@ -20,6 +20,63 @@
   --tensions: #be123c;
 }
 
+.graph-workbench-theme {
+  --background: #f6efe3;
+  --foreground: #172033;
+  --foreground-muted: #536077;
+  --foreground-soft: #6f7b90;
+  --card: rgba(255, 251, 246, 0.84);
+  --card-strong: rgba(255, 252, 248, 0.94);
+  --card-soft: rgba(255, 247, 239, 0.78);
+  --line: rgba(23, 32, 51, 0.16);
+  --line-strong: rgba(23, 32, 51, 0.28);
+  --shadow: 0 24px 70px rgba(19, 26, 38, 0.12);
+  --button-primary: #10253d;
+  --button-primary-hover: #163150;
+  --button-primary-text: #f8fafc;
+  --button-secondary: rgba(255, 255, 255, 0.78);
+  --button-secondary-hover: rgba(255, 255, 255, 0.94);
+  --button-secondary-text: #172033;
+  --backdrop: rgba(15, 23, 42, 0.48);
+  --result-bg: rgba(251, 212, 75, 0.16);
+  --result-line: rgba(215, 78, 18, 0.22);
+  --result-chip-bg: rgba(255, 255, 255, 0.88);
+  --result-chip-text: #8a3f18;
+  background:
+    radial-gradient(circle at top left, rgba(47, 128, 115, 0.20), transparent 24%),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.18), transparent 28%),
+    linear-gradient(180deg, #f7f1e8 0%, #efe5d6 100%);
+  color: var(--foreground);
+}
+
+.graph-workbench-theme[data-theme="dark"] {
+  --background: #0d1b2a;
+  --foreground: #e0e7f1;
+  --foreground-muted: #a7b5c8;
+  --foreground-soft: #7f90a8;
+  --card: rgba(17, 32, 48, 0.78);
+  --card-strong: rgba(24, 38, 59, 0.92);
+  --card-soft: rgba(18, 31, 49, 0.88);
+  --line: rgba(148, 163, 184, 0.22);
+  --line-strong: rgba(197, 209, 221, 0.34);
+  --shadow: 0 28px 90px rgba(2, 6, 23, 0.42);
+  --button-primary: #fbd44b;
+  --button-primary-hover: #ffd95d;
+  --button-primary-text: #1d1406;
+  --button-secondary: rgba(20, 30, 45, 0.86);
+  --button-secondary-hover: rgba(29, 41, 61, 0.96);
+  --button-secondary-text: #e0e7f1;
+  --backdrop: rgba(2, 6, 23, 0.76);
+  --result-bg: rgba(215, 78, 18, 0.16);
+  --result-line: rgba(251, 212, 75, 0.24);
+  --result-chip-bg: rgba(12, 20, 31, 0.66);
+  --result-chip-text: #fbd44b;
+  background:
+    radial-gradient(circle at top left, rgba(65, 90, 119, 0.34), transparent 26%),
+    radial-gradient(circle at top right, rgba(119, 141, 169, 0.24), transparent 28%),
+    linear-gradient(180deg, #09121d 0%, #0d1b2a 100%);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -52,20 +109,60 @@ select {
 }
 
 .glass-panel {
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  background: linear-gradient(180deg, rgba(255, 253, 249, 0.88), rgba(250, 244, 236, 0.74));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.55));
+  background: linear-gradient(180deg, var(--card-strong, rgba(255, 253, 249, 0.88)), var(--card, rgba(250, 244, 236, 0.74)));
   box-shadow: var(--shadow);
   backdrop-filter: blur(20px);
 }
 
 .graph-grid {
   background-image:
-    linear-gradient(rgba(15, 23, 42, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15, 23, 42, 0.06) 1px, transparent 1px);
+    linear-gradient(color-mix(in srgb, var(--foreground) 8%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--foreground) 8%, transparent) 1px, transparent 1px);
   background-size: 28px 28px;
 }
 
 .cluster-chip {
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: rgba(255, 255, 255, 0.7);
+}
+
+.graph-workbench-theme .cluster-chip {
+  border-color: var(--line);
+  background: var(--button-secondary);
+  color: var(--button-secondary-text);
+}
+
+.typing-status {
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.typing-status__text {
+  display: inline-block;
+  max-width: calc(var(--characters, 24) * 1ch + 0.2em);
+  overflow: hidden;
+  white-space: nowrap;
+  width: 0;
+  padding-right: 0.16em;
+  border-right: 1.5px solid currentColor;
+  animation: synaptic-typing-delete var(--typing-duration, 3.6s)
+    steps(var(--characters, 24)) infinite;
+}
+
+@keyframes synaptic-typing-delete {
+  0%,
+  10% {
+    width: 0;
+  }
+
+  42%,
+  56% {
+    width: calc(var(--characters, 24) * 1ch + 0.2em);
+  }
+
+  92%,
+  100% {
+    width: 0;
+  }
 }

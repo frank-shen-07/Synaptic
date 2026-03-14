@@ -24,6 +24,7 @@
     "@supabase/supabase-js": "^2.99.1",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
+    "d3": "^7.9.0",
     "exa-js": "^2.8.0",
     "jspdf": "^4.2.0",
     "lucide-react": "^0.577.0",
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",
+    "@types/d3": "^7.4.3",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

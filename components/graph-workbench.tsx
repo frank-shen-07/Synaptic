@@ -1,83 +1,65 @@
 "use client";
 
-import {
-  Background,
-  Controls,
-  type Node,
-  type NodeTypes,
-  ReactFlow,
-  ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
-} from "@xyflow/react";
 import { jsPDF } from "jspdf";
-import { ArrowLeft, ArrowRight, Copy, Download, Search, Sparkles, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Copy,
+  Download,
+  LocateFixed,
+  MoonStar,
+  Search,
+  Sparkles,
+  SunMedium,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useState, useTransition } from "react";
 
-import { ThoughtNode } from "@/components/thought-node";
-import { buildFlowGraph } from "@/lib/graph/layout";
+import { ForceGraph } from "./force-graph";
+import { usePersistedTheme } from "./use-persisted-theme";
 import type { GraphNodeRecord, GraphSession } from "@/lib/graph/schema";
-
-const nodeTypes = {
-  thoughtNode: ThoughtNode,
-} as unknown as NodeTypes;
 
 type GraphWorkbenchProps = {
   initialSession: GraphSession;
 };
 
-const DRAG_PULL_FACTORS: Record<number, number> = {
-  1: 0.34,
-  2: 0.16,
-  3: 0.08,
+type WorkbenchTheme = "light" | "dark";
+
+type ProcessingKind = "expand" | "crosscheck" | "onepager";
+
+type ProcessingState = {
+  kind: ProcessingKind;
+  nodeLabel?: string;
 };
-const NODE_PADDING = 14;
-const OVERLAP_ITERATIONS = 3;
 
-function nodeSize(node: Node) {
-  const width = typeof node.style?.width === "number" ? node.style.width : 12;
-  const height = typeof node.style?.height === "number" ? node.style.height : 12;
-
-  return Math.max(width, height);
-}
-
-function nodeCenter(node: Node) {
-  const size = nodeSize(node);
-  return {
-    x: node.position.x + size / 2,
-    y: node.position.y + size / 2,
-  };
-}
-
-function buildHopMap(adjacency: Map<string, string[]>, startId: string, maxHops: number) {
-  const visited = new Map<string, number>();
-  const queue: Array<{ id: string; depth: number }> = [{ id: startId, depth: 0 }];
-  visited.set(startId, 0);
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-
-    if (!current || current.depth >= maxHops) {
-      continue;
-    }
-
-    const neighbors = adjacency.get(current.id) ?? [];
-
-    for (const neighbor of neighbors) {
-      if (visited.has(neighbor)) {
-        continue;
-      }
-
-      const depth = current.depth + 1;
-      visited.set(neighbor, depth);
-      queue.push({ id: neighbor, depth });
-    }
-  }
-
-  return visited;
-}
+const NODE_ACCENTS: Record<WorkbenchTheme, Record<GraphNodeRecord["type"], string>> = {
+  light: {
+    seed: "#0f766e",
+    inspiration: "#1f8a70",
+    target_audience: "#2563eb",
+    technical_constraints: "#d97706",
+    business_constraints: "#7c3aed",
+    risks_failure_modes: "#dc2626",
+    prior_art: "#a16207",
+    adjacent_analogies: "#4f46e5",
+    open_questions: "#64748b",
+    tensions: "#be185d",
+  },
+  dark: {
+    seed: "#63d1c4",
+    inspiration: "#7ce0c8",
+    target_audience: "#86c7ff",
+    technical_constraints: "#ffb85c",
+    business_constraints: "#d6a8ff",
+    risks_failure_modes: "#ff9287",
+    prior_art: "#fbd44b",
+    adjacent_analogies: "#a8b8ff",
+    open_questions: "#b3c0d1",
+    tensions: "#ff9cbc",
+  },
+};
 
 const detailSections: Array<{
   key: keyof GraphNodeRecord["details"];
@@ -103,208 +85,145 @@ function isGraphSession(payload: unknown): payload is GraphSession {
   );
 }
 
-function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
+function getProcessingCopy(state: ProcessingState | null) {
+  if (!state) return null;
+
+  if (state.kind === "expand") {
+    return {
+      title: "Expanding branch",
+      detail: state.nodeLabel
+        ? `We are branching out from ${state.nodeLabel}.`
+        : "We are branching out from the selected idea.",
+      animationText: "Generating related branches",
+    };
+  }
+
+  if (state.kind === "crosscheck") {
+    return {
+      title: "Cross-checking prior art",
+      detail: state.nodeLabel
+        ? `We are looking for adjacent ideas around ${state.nodeLabel}.`
+        : "We are looking for adjacent ideas around this node.",
+      animationText: "Scanning similar ideas",
+    };
+  }
+
+  return {
+    title: "Building one-pager",
+    detail: "We are shaping the current graph into a concise exportable brief.",
+    animationText: "Drafting one-pager narrative",
+  };
+}
+
+function TypingStatus({ text }: { text: string }) {
+  return (
+    <span
+      className="typing-status"
+      style={
+        {
+          "--characters": text.length,
+          "--typing-duration": `${Math.max(3.4, text.length * 0.12)}s`,
+        } as React.CSSProperties
+      }
+    >
+      <span className="typing-status__text">{text}</span>
+    </span>
+  );
+}
+
+export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
   const pathname = usePathname();
   const [session, setSession] = useState(initialSession);
-  const [selectedNodeId, setSelectedNodeId] = useState(initialSession.graph.nodes[0]?.id ?? null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
+    initialSession.graph.nodes[0]?.id ?? null,
+  );
+  const { theme, setTheme } = usePersistedTheme("synaptic-workbench-theme");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [processingState, setProcessingState] = useState<ProcessingState | null>(null);
+  const [resetViewVersion, setResetViewVersion] = useState(0);
   const [isPending, startTransition] = useTransition();
-  const initialFlowGraph = buildFlowGraph(initialSession.graph.nodes, initialSession.graph.edges);
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialFlowGraph.nodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialFlowGraph.edges);
-  const [lastDragPosition, setLastDragPosition] = useState<{ id: string; x: number; y: number } | null>(null);
-
-  const adjacency = edges.reduce((map, edge) => {
-    const source = map.get(edge.source) ?? [];
-    source.push(edge.target);
-    map.set(edge.source, source);
-
-    const target = map.get(edge.target) ?? [];
-    target.push(edge.source);
-    map.set(edge.target, target);
-
-    return map;
-  }, new Map<string, string[]>());
 
   const selectedNode =
     session.graph.nodes.find((node) => node.id === selectedNodeId) ??
     session.graph.nodes.find((node) => node.type === "seed") ??
     null;
 
-  useEffect(() => {
-    const updated = buildFlowGraph(session.graph.nodes, session.graph.edges);
-    setNodes(updated.nodes);
-    setEdges(updated.edges);
-    setLastDragPosition(null);
-  }, [session, setEdges, setNodes]);
-
-  function applyNodePhysics(draggedId: string, deltaX: number, deltaY: number) {
-    if (Math.abs(deltaX) < 0.01 && Math.abs(deltaY) < 0.01) {
-      return;
-    }
-
-    const hopMap = buildHopMap(adjacency, draggedId, 3);
-
-    setNodes((prevNodes) => {
-      const adjustedNodes = prevNodes.map((node) => {
-        if (node.id === draggedId) {
-          return node;
-        }
-
-        const hops = hopMap.get(node.id);
-        const pullFactor = hops ? DRAG_PULL_FACTORS[hops] ?? 0 : 0;
-
-        if (pullFactor === 0) {
-          return node;
-        }
-
-        return {
-          ...node,
-          position: {
-            x: node.position.x + deltaX * pullFactor,
-            y: node.position.y + deltaY * pullFactor,
-          },
-        };
-      });
-
-      for (let iteration = 0; iteration < OVERLAP_ITERATIONS; iteration += 1) {
-        for (let i = 0; i < adjustedNodes.length; i += 1) {
-          for (let j = i + 1; j < adjustedNodes.length; j += 1) {
-            const first = adjustedNodes[i];
-            const second = adjustedNodes[j];
-            const firstCenter = nodeCenter(first);
-            const secondCenter = nodeCenter(second);
-
-            let dx = secondCenter.x - firstCenter.x;
-            let dy = secondCenter.y - firstCenter.y;
-            const distance = Math.sqrt(dx * dx + dy * dy) || 0.0001;
-            const minimumDistance = nodeSize(first) / 2 + nodeSize(second) / 2 + NODE_PADDING;
-
-            if (distance >= minimumDistance) {
-              continue;
-            }
-
-            const overlap = minimumDistance - distance;
-
-            if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
-              dx = 0.01;
-              dy = 0;
-            }
-
-            const nx = dx / distance;
-            const ny = dy / distance;
-            const firstIsDragged = first.id === draggedId;
-            const secondIsDragged = second.id === draggedId;
-
-            if (firstIsDragged && !secondIsDragged) {
-              adjustedNodes[j] = {
-                ...second,
-                position: {
-                  x: second.position.x + nx * overlap,
-                  y: second.position.y + ny * overlap,
-                },
-              };
-              continue;
-            }
-
-            if (secondIsDragged && !firstIsDragged) {
-              adjustedNodes[i] = {
-                ...first,
-                position: {
-                  x: first.position.x - nx * overlap,
-                  y: first.position.y - ny * overlap,
-                },
-              };
-              continue;
-            }
-
-            const split = overlap / 2;
-            adjustedNodes[i] = {
-              ...first,
-              position: {
-                x: first.position.x - nx * split,
-                y: first.position.y - ny * split,
-              },
-            };
-            adjustedNodes[j] = {
-              ...second,
-              position: {
-                x: second.position.x + nx * split,
-                y: second.position.y + ny * split,
-              },
-            };
-          }
-        }
-      }
-
-      return adjustedNodes;
-    });
-  }
+  const handleNodeClick = useCallback((nodeId: string) => {
+    setSelectedNodeId(nodeId);
+    setIsModalOpen(true);
+  }, []);
 
   async function mutateSession(
     endpoint: string,
     body?: Record<string, string>,
     fallbackMessage?: string,
+    processingKind: ProcessingKind = "expand",
   ) {
     setNotice(null);
-    startTransition(async () => {
-      try {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: body
-            ? {
-                "content-type": "application/json",
-              }
-            : undefined,
-          body: body ? JSON.stringify(body) : undefined,
-        });
+    setProcessingState({ kind: processingKind, nodeLabel: selectedNode?.label });
 
-        const payload = (await response.json()) as unknown;
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
 
-        if (!response.ok || !isGraphSession(payload)) {
-          const message =
-            payload && typeof payload === "object" && "error" in payload
-              ? String(payload.error)
-              : fallbackMessage ?? "Request failed.";
-          throw new Error(message);
-        }
+      const payload = (await response.json()) as unknown;
 
-        setSession(payload);
-      } catch (error) {
-        setNotice(error instanceof Error ? error.message : fallbackMessage ?? "Request failed.");
+      if (!response.ok || !isGraphSession(payload)) {
+        const message =
+          payload && typeof payload === "object" && "error" in payload
+            ? String(payload.error)
+            : fallbackMessage ?? "Request failed.";
+        throw new Error(message);
       }
-    });
+
+      startTransition(() => {
+        setSession(payload);
+      });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : fallbackMessage ?? "Request failed.");
+    } finally {
+      setProcessingState(null);
+    }
   }
 
   async function generateBrief() {
     setNotice(null);
-    startTransition(async () => {
-      try {
-        const response = await fetch(`/api/sessions/${session.id}/one-pager`, {
-          method: "POST",
-        });
-        const payload = (await response.json()) as unknown;
+    setProcessingState({ kind: "onepager" });
 
-        if (
-          !response.ok ||
-          !payload ||
-          typeof payload !== "object" ||
-          !("session" in payload) ||
-          !isGraphSession(payload.session)
-        ) {
-          const message =
-            payload && typeof payload === "object" && "error" in payload
-              ? String(payload.error)
-              : "Could not generate one-pager.";
-          throw new Error(message);
-        }
+    try {
+      const response = await fetch(`/api/sessions/${session.id}/one-pager`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as unknown;
 
-        setSession(payload.session);
-      } catch (error) {
-        setNotice(error instanceof Error ? error.message : "Could not generate one-pager.");
+      if (
+        !response.ok ||
+        !payload ||
+        typeof payload !== "object" ||
+        !("session" in payload) ||
+        !isGraphSession(payload.session)
+      ) {
+        const message =
+          payload && typeof payload === "object" && "error" in payload
+            ? String(payload.error)
+            : "Could not generate one-pager.";
+        throw new Error(message);
       }
-    });
+
+      const nextSession = payload.session as GraphSession;
+
+      startTransition(() => {
+        setSession(nextSession);
+      });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not generate one-pager.");
+    } finally {
+      setProcessingState(null);
+    }
   }
 
   async function copyShareLink() {
@@ -319,134 +238,167 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
       return;
     }
 
-    const pdf = new jsPDF({
-      unit: "pt",
-      format: "letter",
-    });
-
+    const pdf = new jsPDF({ unit: "pt", format: "letter" });
     pdf.setFont("times", "bold");
     pdf.setFontSize(18);
     pdf.text(session.onePager.title, 48, 56);
     pdf.setFont("times", "normal");
     pdf.setFontSize(11);
-
     const lines = pdf.splitTextToSize(session.onePager.exportText, 510);
     pdf.text(lines, 48, 84);
     pdf.save(`${session.seed.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-one-pager.pdf`);
   }
 
+  const secondaryButtonClass =
+    "inline-flex items-center gap-2 rounded-full border px-4 py-3 text-sm font-semibold transition";
+  const processingCopy = getProcessingCopy(processingState);
+  const nodeAccent = selectedNode ? NODE_ACCENTS[theme][selectedNode.type] : NODE_ACCENTS[theme].seed;
+  const titleGlow =
+    theme === "dark"
+      ? `0 18px 34px color-mix(in srgb, ${nodeAccent} 26%, transparent)`
+      : `0 16px 30px color-mix(in srgb, ${nodeAccent} 18%, transparent)`;
+  const busy = Boolean(processingState) || isPending;
+
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-5 px-4 py-4 md:px-6 md:py-6">
-      <header className="glass-panel rounded-[2rem] p-5 md:px-7 md:py-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <Link
-                href="/workspace"
-                className="inline-flex items-center gap-1.5 rounded-full border border-slate-900/10 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
-                style={{ fontFamily: "var(--font-body)" }}
+    <div
+      data-theme={theme}
+      className="graph-workbench-theme min-h-screen"
+      style={{ colorScheme: theme }}
+    >
+      <main className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-5 px-4 py-4 md:px-6 md:py-6">
+        <header className="glass-panel rounded-[2rem] p-5 md:px-7 md:py-6 text-[var(--foreground)]">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/workspace"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--line)] bg-[var(--button-secondary)] px-3 py-1.5 text-xs font-semibold text-[var(--foreground-muted)] transition hover:bg-[var(--button-secondary-hover)] hover:text-[var(--foreground)]"
+                  style={{ fontFamily: "var(--font-body)" }}
+                >
+                  <ArrowLeft className="h-3 w-3" />
+                  Back
+                </Link>
+                <Link
+                  href="/workspace"
+                  className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground-soft)]"
+                >
+                  Synaptic
+                </Link>
+              </div>
+              <h1
+                className="mt-2 max-w-5xl text-4xl leading-none text-[var(--foreground)] md:text-5xl"
+                style={{ fontFamily: "var(--font-display)" }}
               >
-                <ArrowLeft className="h-3 w-3" />
-                Back
-              </Link>
-              <Link href="/workspace" className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-                Synaptic
-              </Link>
+                {session.seed}
+              </h1>
             </div>
-            <h1 className="mt-2 max-w-5xl text-4xl leading-none text-slate-950 md:text-5xl" style={{ fontFamily: "var(--font-display)" }}>
-              {session.seed}
-            </h1>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-3" style={{ fontFamily: "var(--font-body)" }}>
-            <button
-              type="button"
-              onClick={generateBrief}
-              disabled={isPending}
-              className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:cursor-wait disabled:bg-slate-500"
+            <div
+              className="flex flex-wrap items-center gap-3"
+              style={{ fontFamily: "var(--font-body)" }}
             >
-              <Sparkles className="h-4 w-4" />
-              Generate one-pager
-            </button>
-            <button
-              type="button"
-              onClick={copyShareLink}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-900/10 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800"
-            >
-              <Copy className="h-4 w-4" />
-              Copy share link
-            </button>
-            <button
-              type="button"
-              onClick={exportPdf}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-900/10 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-800"
-            >
-              <Download className="h-4 w-4" />
-              Export PDF
-            </button>
+              <button
+                type="button"
+                onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+                className={`${secondaryButtonClass} border-[color:var(--line)] bg-[var(--button-secondary)] text-[var(--button-secondary-text)] hover:bg-[var(--button-secondary-hover)]`}
+                aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+              >
+                {theme === "light" ? (
+                  <MoonStar className="h-4 w-4" />
+                ) : (
+                  <SunMedium className="h-4 w-4" />
+                )}
+                {theme === "light" ? "Dark mode" : "Light mode"}
+              </button>
+              <button
+                type="button"
+                onClick={generateBrief}
+                disabled={busy}
+                className="inline-flex items-center gap-2 rounded-full bg-[var(--button-primary)] px-4 py-3 text-sm font-semibold text-[var(--button-primary-text)] transition hover:bg-[var(--button-primary-hover)] disabled:cursor-wait disabled:opacity-60"
+              >
+                <Sparkles className="h-4 w-4" />
+                Generate one-pager
+              </button>
+              <button
+                type="button"
+                onClick={copyShareLink}
+                className={`${secondaryButtonClass} border-[color:var(--line)] bg-[var(--button-secondary)] text-[var(--button-secondary-text)] hover:bg-[var(--button-secondary-hover)]`}
+              >
+                <Copy className="h-4 w-4" />
+                Copy share link
+              </button>
+              <button
+                type="button"
+                onClick={exportPdf}
+                className={`${secondaryButtonClass} border-[color:var(--line)] bg-[var(--button-secondary)] text-[var(--button-secondary-text)] hover:bg-[var(--button-secondary-hover)]`}
+              >
+                <Download className="h-4 w-4" />
+                Export PDF
+              </button>
+            </div>
           </div>
-        </div>
-
-      </header>
+        </header>
 
       {notice ? (
-        <div className="glass-panel rounded-[1.4rem] px-5 py-3 text-sm text-slate-700" style={{ fontFamily: "var(--font-body)" }}>
+        <div
+          className="glass-panel rounded-[1.4rem] px-5 py-3 text-sm text-[var(--foreground-muted)]"
+          style={{ fontFamily: "var(--font-body)" }}
+        >
           {notice}
         </div>
       ) : null}
 
-      <section className="glass-panel graph-grid relative overflow-hidden rounded-[2rem]">
-        <div className="absolute left-5 top-5 z-10 rounded-full border border-slate-900/10 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500" style={{ fontFamily: "var(--font-body)" }}>
-          Click a node to inspect it
+      <section className="glass-panel relative overflow-hidden rounded-[2rem]">
+        <div
+          className="absolute left-5 top-5 z-10 rounded-full border border-[color:var(--line)] bg-[var(--button-secondary)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground-soft)]"
+          style={{ fontFamily: "var(--font-body)" }}
+        >
+          Hover to preview · click to explore
         </div>
 
-        <div className="h-[78vh] w-full">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.25 }}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeClick={(_, node) => {
-              setSelectedNodeId(node.id);
-              setIsModalOpen(true);
-            }}
-            onNodeDragStart={(_, node) => {
-              setLastDragPosition({ id: node.id, x: node.position.x, y: node.position.y });
-            }}
-            onNodeDrag={(_, node) => {
-              setLastDragPosition((previous) => {
-                if (!previous || previous.id !== node.id) {
-                  return { id: node.id, x: node.position.x, y: node.position.y };
-                }
+        <button
+          type="button"
+          onClick={() => setResetViewVersion((current) => current + 1)}
+          className="absolute right-5 top-5 z-10 inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] bg-[var(--button-secondary)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--button-secondary-text)] transition hover:bg-[var(--button-secondary-hover)]"
+          style={{ fontFamily: "var(--font-body)" }}
+        >
+          <LocateFixed className="h-3.5 w-3.5" />
+          Reset view
+        </button>
 
-                const deltaX = node.position.x - previous.x;
-                const deltaY = node.position.y - previous.y;
-                applyNodePhysics(node.id, deltaX, deltaY);
-
-                return { id: node.id, x: node.position.x, y: node.position.y };
-              });
-            }}
-            onNodeDragStop={() => {
-              setLastDragPosition(null);
-            }}
-            proOptions={{ hideAttribution: true }}
-            minZoom={0.05}
-            maxZoom={4}
-            nodesDraggable={true}
-            elementsSelectable={true}
+        {processingCopy ? (
+          <div
+            className="absolute bottom-5 right-5 z-10 max-w-sm rounded-[1.4rem] border border-[color:var(--line-strong)] bg-[color:var(--card-strong)] px-4 py-3 text-[var(--foreground)] shadow-[var(--shadow)] backdrop-blur"
+            style={{ fontFamily: "var(--font-body)" }}
           >
-            <Background color="rgba(15,23,42,0.04)" gap={40} />
-            <Controls />
-          </ReactFlow>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--foreground-soft)]">
+              {processingCopy.title}
+            </p>
+            <div className="mt-2 text-sm font-semibold text-[var(--foreground)]">
+              <TypingStatus text={processingCopy.animationText} />
+            </div>
+            <p className="mt-2 text-sm leading-6 text-[var(--foreground-muted)]">
+              {processingCopy.detail}
+            </p>
+          </div>
+        ) : null}
+
+        <div className="graph-grid h-[78vh] w-full">
+          <ForceGraph
+            nodes={session.graph.nodes}
+            edges={session.graph.edges}
+            selectedNodeId={selectedNodeId}
+            onNodeClick={handleNodeClick}
+            theme={theme}
+            resetViewVersion={resetViewVersion}
+          />
         </div>
       </section>
 
       {isModalOpen && selectedNode ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-8"
+          className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8"
+          style={{ background: "var(--backdrop)" }}
           onClick={() => setIsModalOpen(false)}
         >
           <div
@@ -456,30 +408,54 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                <p
+                  className="inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em]"
+                  style={{
+                    color: nodeAccent,
+                    background: `color-mix(in srgb, ${nodeAccent} 14%, transparent)`,
+                    boxShadow: titleGlow,
+                  }}
+                >
                   {selectedNode.depth === 0 ? "Seed node" : `Depth ${selectedNode.depth} idea`}
                 </p>
-                <h2 className="mt-2 text-4xl leading-tight text-slate-950" style={{ fontFamily: "var(--font-display)" }}>
+                <h2
+                  className="mt-3 inline-block rounded-[1.4rem] px-3 py-2 text-4xl leading-tight text-[var(--foreground)]"
+                  style={{
+                    fontFamily: "var(--font-display)",
+                    background: `linear-gradient(120deg, color-mix(in srgb, ${nodeAccent} 20%, transparent), transparent 72%)`,
+                    boxShadow: titleGlow,
+                  }}
+                >
                   {selectedNode.label}
                 </h2>
-                <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-700">{selectedNode.summary}</p>
+                <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--foreground-muted)]">
+                  {selectedNode.summary}
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="rounded-full border border-slate-900/10 bg-white/80 p-3 text-slate-700"
+                className="rounded-full border border-[color:var(--line)] bg-[var(--button-secondary)] p-3 text-[var(--button-secondary-text)] transition hover:bg-[var(--button-secondary-hover)]"
                 aria-label="Close node details"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="mt-5 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-slate-500">
-              <span className="rounded-full border border-slate-900/10 px-3 py-1">
-                {session.graph.nodes.filter((node) => node.parentId === selectedNode.id).length}/5 child ideas
+            <div className="mt-5 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--foreground-soft)]">
+              <span className="rounded-full border border-[color:var(--line)] px-3 py-1">
+                {session.graph.nodes.filter((node) => node.parentId === selectedNode.id).length}/5
+                child ideas
               </span>
               {selectedNode.crosscheckedAt ? (
-                <span className="rounded-full border border-amber-700/10 bg-amber-50 px-3 py-1 text-amber-800">
+                <span
+                  className="rounded-full border px-3 py-1"
+                  style={{
+                    borderColor: "var(--result-line)",
+                    background: "var(--result-bg)",
+                    color: "var(--result-chip-text)",
+                  }}
+                >
                   Cross-checked {new Date(selectedNode.crosscheckedAt).toLocaleString()}
                 </span>
               ) : null}
@@ -493,10 +469,11 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
                     `/api/sessions/${session.id}/expand`,
                     { nodeId: selectedNode.id, mode: "deeper" },
                     "Could not expand node.",
+                    "expand",
                   )
                 }
-                disabled={!selectedNode.expandable || isPending}
-                className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                disabled={!selectedNode.expandable || busy}
+                className="inline-flex items-center gap-2 rounded-full bg-[var(--button-primary)] px-4 py-3 text-sm font-semibold text-[var(--button-primary-text)] transition hover:bg-[var(--button-primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Expand node
                 <ArrowRight className="h-4 w-4" />
@@ -508,29 +485,64 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
                     `/api/sessions/${session.id}/crosscheck`,
                     { nodeId: selectedNode.id },
                     "Could not cross-check node.",
+                    "crosscheck",
                   )
                 }
-                disabled={isPending}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-900/10 bg-white/80 px-4 py-3 text-sm font-semibold text-slate-900 disabled:cursor-wait disabled:text-slate-400"
+                disabled={busy}
+                className="inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] bg-[var(--button-secondary)] px-4 py-3 text-sm font-semibold text-[var(--button-secondary-text)] transition hover:bg-[var(--button-secondary-hover)] disabled:cursor-wait disabled:opacity-60"
               >
                 <Search className="h-4 w-4" />
                 Cross-check for existing similar ideas
               </button>
             </div>
 
+            {processingCopy && processingState?.kind !== "onepager" ? (
+              <div
+                className="mt-4 rounded-[1.4rem] border border-[color:var(--line)] px-4 py-3"
+                style={{ background: "var(--card-soft)" }}
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--foreground-soft)]">
+                  Live processing
+                </p>
+                <div className="mt-2 text-sm font-semibold text-[var(--foreground)]">
+                  <TypingStatus text={processingCopy.animationText} />
+                </div>
+                <p className="mt-2 text-sm leading-6 text-[var(--foreground-muted)]">
+                  {processingCopy.detail}
+                </p>
+              </div>
+            ) : null}
+
             <div className="mt-8 grid gap-4 md:grid-cols-2">
               {detailSections.map((section) => {
                 const values = selectedNode.details[section.key];
-
                 return (
-                  <section key={section.key} className="rounded-[1.5rem] border border-slate-900/10 bg-white/70 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{section.label}</p>
+                  <section
+                    key={section.key}
+                    className="rounded-[1.5rem] border border-[color:var(--line)] p-4"
+                    style={{ background: "var(--card-soft)" }}
+                  >
+                    <p
+                      className="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.22em]"
+                      style={{
+                        color: nodeAccent,
+                        background: `color-mix(in srgb, ${nodeAccent} 10%, transparent)`,
+                      }}
+                    >
+                      {section.label}
+                    </p>
                     {values.length === 0 ? (
-                      <p className="mt-3 text-sm leading-6 text-slate-500">No content yet.</p>
+                      <p className="mt-3 text-sm leading-6 text-[var(--foreground-soft)]">
+                        No content yet.
+                      </p>
                     ) : (
-                      <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
+                      <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--foreground-muted)]">
                         {values.map((value) => (
-                          <li key={value} className="rounded-[1rem] bg-slate-50/85 px-3 py-2">
+                          <li
+                            key={value}
+                            className="rounded-[1rem] px-3 py-2"
+                            style={{ background: "var(--button-secondary)" }}
+                          >
                             {value}
                           </li>
                         ))}
@@ -541,10 +553,21 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
               })}
             </div>
 
-            <section className="mt-6 rounded-[1.5rem] border border-slate-900/10 bg-white/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Cross-check results</p>
+            <section
+              className="mt-6 rounded-[1.5rem] border border-[color:var(--line)] p-4"
+              style={{ background: "var(--card-soft)" }}
+            >
+              <p
+                className="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.22em]"
+                style={{
+                  color: nodeAccent,
+                  background: `color-mix(in srgb, ${nodeAccent} 10%, transparent)`,
+                }}
+              >
+                Cross-check results
+              </p>
               {selectedNode.priorArt.length === 0 ? (
-                <p className="mt-3 text-sm leading-6 text-slate-600">
+                <p className="mt-3 text-sm leading-6 text-[var(--foreground-muted)]">
                   No similarity search has been run for this node yet.
                 </p>
               ) : (
@@ -555,18 +578,30 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
                       href={hit.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="block rounded-[1.2rem] border border-amber-700/10 bg-amber-50/75 px-4 py-3"
+                      className="block rounded-[1.2rem] border px-4 py-3"
+                      style={{ borderColor: "var(--result-line)", background: "var(--result-bg)" }}
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div>
-                          <p className="text-sm font-semibold text-amber-950">{hit.title}</p>
-                          <p className="mt-1 text-sm leading-6 text-slate-700">{hit.snippet}</p>
+                          <p className="text-sm font-semibold text-[var(--foreground)]">
+                            {hit.title}
+                          </p>
+                          <p className="mt-1 text-sm leading-6 text-[var(--foreground-muted)]">
+                            {hit.snippet}
+                          </p>
                         </div>
                         <div className="flex flex-col items-end gap-2">
-                          <span className="rounded-full border border-amber-700/15 bg-white/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-900">
+                          <span
+                            className="rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]"
+                            style={{
+                              borderColor: "var(--result-line)",
+                              background: "var(--result-chip-bg)",
+                              color: "var(--result-chip-text)",
+                            }}
+                          >
                             {hit.source}
                           </span>
-                          <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--foreground-soft)]">
                             {(hit.matchScore * 100).toFixed(0)}% match
                           </span>
                         </div>
@@ -580,13 +615,6 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
         </div>
       ) : null}
     </main>
-  );
-}
-
-export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
-  return (
-    <ReactFlowProvider>
-      <GraphWorkbenchInner initialSession={initialSession} />
-    </ReactFlowProvider>
+    </div>
   );
 }
