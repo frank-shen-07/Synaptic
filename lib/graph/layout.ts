@@ -26,15 +26,15 @@ function getRadiusForDepth(depth: number) {
     return 0;
   }
 
-  return 260 + (depth - 1) * 210;
+  return 110 + (depth - 1) * 90;
 }
 
 function getNodeSize(node: GraphNodeRecord) {
   if (node.depth === 0) {
-    return 190;
+    return 16;
   }
 
-  return Math.max(116, Math.round(136 - node.depth * 10 + node.weight * 14));
+  return Math.max(6, Math.round(11 - node.depth * 1.5));
 }
 
 function midpoint(sector: Sector) {
@@ -149,25 +149,12 @@ export function buildFlowGraph(
     id: edge.id,
     source: edge.source,
     target: edge.target,
-    type: "smoothstep",
-    animated: edge.highlighted,
-    label: edge.label,
+    type: "straight",
+    animated: false,
     data: edge,
-    labelStyle: {
-      fill: "#0f172a",
-      fontSize: 11,
-      fontWeight: 700,
-    },
-    labelBgStyle: {
-      fill: "#fffdf9",
-      fillOpacity: 0.96,
-      stroke: edge.highlighted ? "#be123c" : "#d4cdc3",
-      strokeWidth: 1,
-    },
-    labelBgPadding: [6, 3],
     style: {
-      stroke: edge.highlighted ? "#be123c" : "#7b8794",
-      strokeWidth: edge.highlighted ? 2.1 : 1.3,
+      stroke: edge.highlighted ? "rgba(190,18,60,0.5)" : "rgba(148,163,184,0.3)",
+      strokeWidth: edge.highlighted ? 1.2 : 0.6,
     },
   }));
 

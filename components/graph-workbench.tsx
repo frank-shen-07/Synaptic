@@ -3,7 +3,7 @@
 import {
   Background,
   Controls,
-  MiniMap,
+  type Node,
   type NodeTypes,
   ReactFlow,
   ReactFlowProvider,
@@ -27,6 +27,57 @@ const nodeTypes = {
 type GraphWorkbenchProps = {
   initialSession: GraphSession;
 };
+
+const DRAG_PULL_FACTORS: Record<number, number> = {
+  1: 0.34,
+  2: 0.16,
+  3: 0.08,
+};
+const NODE_PADDING = 14;
+const OVERLAP_ITERATIONS = 3;
+
+function nodeSize(node: Node) {
+  const width = typeof node.style?.width === "number" ? node.style.width : 12;
+  const height = typeof node.style?.height === "number" ? node.style.height : 12;
+
+  return Math.max(width, height);
+}
+
+function nodeCenter(node: Node) {
+  const size = nodeSize(node);
+  return {
+    x: node.position.x + size / 2,
+    y: node.position.y + size / 2,
+  };
+}
+
+function buildHopMap(adjacency: Map<string, string[]>, startId: string, maxHops: number) {
+  const visited = new Map<string, number>();
+  const queue: Array<{ id: string; depth: number }> = [{ id: startId, depth: 0 }];
+  visited.set(startId, 0);
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+
+    if (!current || current.depth >= maxHops) {
+      continue;
+    }
+
+    const neighbors = adjacency.get(current.id) ?? [];
+
+    for (const neighbor of neighbors) {
+      if (visited.has(neighbor)) {
+        continue;
+      }
+
+      const depth = current.depth + 1;
+      visited.set(neighbor, depth);
+      queue.push({ id: neighbor, depth });
+    }
+  }
+
+  return visited;
+}
 
 const detailSections: Array<{
   key: keyof GraphNodeRecord["details"];
@@ -62,6 +113,19 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
   const initialFlowGraph = buildFlowGraph(initialSession.graph.nodes, initialSession.graph.edges);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialFlowGraph.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialFlowGraph.edges);
+  const [lastDragPosition, setLastDragPosition] = useState<{ id: string; x: number; y: number } | null>(null);
+
+  const adjacency = edges.reduce((map, edge) => {
+    const source = map.get(edge.source) ?? [];
+    source.push(edge.target);
+    map.set(edge.source, source);
+
+    const target = map.get(edge.target) ?? [];
+    target.push(edge.source);
+    map.set(edge.target, target);
+
+    return map;
+  }, new Map<string, string[]>());
 
   const selectedNode =
     session.graph.nodes.find((node) => node.id === selectedNodeId) ??
@@ -72,7 +136,111 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
     const updated = buildFlowGraph(session.graph.nodes, session.graph.edges);
     setNodes(updated.nodes);
     setEdges(updated.edges);
+    setLastDragPosition(null);
   }, [session, setEdges, setNodes]);
+
+  function applyNodePhysics(draggedId: string, deltaX: number, deltaY: number) {
+    if (Math.abs(deltaX) < 0.01 && Math.abs(deltaY) < 0.01) {
+      return;
+    }
+
+    const hopMap = buildHopMap(adjacency, draggedId, 3);
+
+    setNodes((prevNodes) => {
+      const adjustedNodes = prevNodes.map((node) => {
+        if (node.id === draggedId) {
+          return node;
+        }
+
+        const hops = hopMap.get(node.id);
+        const pullFactor = hops ? DRAG_PULL_FACTORS[hops] ?? 0 : 0;
+
+        if (pullFactor === 0) {
+          return node;
+        }
+
+        return {
+          ...node,
+          position: {
+            x: node.position.x + deltaX * pullFactor,
+            y: node.position.y + deltaY * pullFactor,
+          },
+        };
+      });
+
+      for (let iteration = 0; iteration < OVERLAP_ITERATIONS; iteration += 1) {
+        for (let i = 0; i < adjustedNodes.length; i += 1) {
+          for (let j = i + 1; j < adjustedNodes.length; j += 1) {
+            const first = adjustedNodes[i];
+            const second = adjustedNodes[j];
+            const firstCenter = nodeCenter(first);
+            const secondCenter = nodeCenter(second);
+
+            let dx = secondCenter.x - firstCenter.x;
+            let dy = secondCenter.y - firstCenter.y;
+            const distance = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+            const minimumDistance = nodeSize(first) / 2 + nodeSize(second) / 2 + NODE_PADDING;
+
+            if (distance >= minimumDistance) {
+              continue;
+            }
+
+            const overlap = minimumDistance - distance;
+
+            if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
+              dx = 0.01;
+              dy = 0;
+            }
+
+            const nx = dx / distance;
+            const ny = dy / distance;
+            const firstIsDragged = first.id === draggedId;
+            const secondIsDragged = second.id === draggedId;
+
+            if (firstIsDragged && !secondIsDragged) {
+              adjustedNodes[j] = {
+                ...second,
+                position: {
+                  x: second.position.x + nx * overlap,
+                  y: second.position.y + ny * overlap,
+                },
+              };
+              continue;
+            }
+
+            if (secondIsDragged && !firstIsDragged) {
+              adjustedNodes[i] = {
+                ...first,
+                position: {
+                  x: first.position.x - nx * overlap,
+                  y: first.position.y - ny * overlap,
+                },
+              };
+              continue;
+            }
+
+            const split = overlap / 2;
+            adjustedNodes[i] = {
+              ...first,
+              position: {
+                x: first.position.x - nx * split,
+                y: first.position.y - ny * split,
+              },
+            };
+            adjustedNodes[j] = {
+              ...second,
+              position: {
+                x: second.position.x + nx * split,
+                y: second.position.y + ny * split,
+              },
+            };
+          }
+        }
+      }
+
+      return adjustedNodes;
+    });
+  }
 
   async function mutateSession(
     endpoint: string,
@@ -181,7 +349,7 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
                 <ArrowLeft className="h-3 w-3" />
                 Back
               </Link>
-              <Link href="/" className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              <Link href="/workspace" className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
                 Synaptic
               </Link>
             </div>
@@ -238,26 +406,40 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
             edges={edges}
             nodeTypes={nodeTypes}
             fitView
-            fitViewOptions={{ padding: 0.18 }}
+            fitViewOptions={{ padding: 0.25 }}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onNodeClick={(_, node) => {
               setSelectedNodeId(node.id);
               setIsModalOpen(true);
             }}
+            onNodeDragStart={(_, node) => {
+              setLastDragPosition({ id: node.id, x: node.position.x, y: node.position.y });
+            }}
+            onNodeDrag={(_, node) => {
+              setLastDragPosition((previous) => {
+                if (!previous || previous.id !== node.id) {
+                  return { id: node.id, x: node.position.x, y: node.position.y };
+                }
+
+                const deltaX = node.position.x - previous.x;
+                const deltaY = node.position.y - previous.y;
+                applyNodePhysics(node.id, deltaX, deltaY);
+
+                return { id: node.id, x: node.position.x, y: node.position.y };
+              });
+            }}
+            onNodeDragStop={() => {
+              setLastDragPosition(null);
+            }}
             proOptions={{ hideAttribution: true }}
+            minZoom={0.05}
+            maxZoom={4}
+            nodesDraggable={true}
+            elementsSelectable={true}
           >
-            <Background color="rgba(15,23,42,0.07)" gap={28} />
+            <Background color="rgba(15,23,42,0.04)" gap={40} />
             <Controls />
-            <MiniMap
-              pannable
-              zoomable
-              maskColor="rgba(243,237,227,0.78)"
-              style={{
-                backgroundColor: "rgba(255,255,255,0.86)",
-                border: "1px solid rgba(15,23,42,0.08)",
-              }}
-            />
           </ReactFlow>
         </div>
       </section>
