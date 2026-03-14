@@ -168,11 +168,13 @@ export async function searchElasticSimilarIdeas(query: string, excludeSessionId?
   return (response.hits.hits ?? []).map((hit, index) => {
     const source = hit._source;
     const score = clamp((hit._score ?? 0) / 2, 0, 1);
+    const sessionId = source?.session_id ?? "unknown";
+    const ideaId = source?.idea_id ?? `elastic_${index}`;
 
     return {
-      id: source?.idea_id ?? `elastic_${index}`,
+      id: ideaId,
       title: source?.label ?? "Similar indexed idea",
-      url: "#",
+      url: `https://synaptic.local/session/${sessionId}?idea=${ideaId}`,
       snippet: source?.summary ?? "Indexed idea from Elasticsearch.",
       source: "Elasticsearch",
       matchScore: score,

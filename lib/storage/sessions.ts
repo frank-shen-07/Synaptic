@@ -13,13 +13,66 @@ type SessionRow = {
   updated_at: string;
 };
 
+function isValidUrl(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) {
+    return false;
+  }
+
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sanitizePriorArtHits(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((hit) => {
+    if (!hit || typeof hit !== "object") {
+      return [];
+    }
+
+    const record = hit as Record<string, unknown>;
+
+    if (!isValidUrl(record.url)) {
+      return [];
+    }
+
+    return [record];
+  });
+}
+
 function toSession(row: SessionRow): GraphSession {
+  const graph = row.graph && typeof row.graph === "object" ? structuredClone(row.graph) : row.graph;
+  const insights = row.insights && typeof row.insights === "object" ? structuredClone(row.insights) : row.insights;
+
+  if (graph && typeof graph === "object" && "nodes" in graph && Array.isArray((graph as { nodes?: unknown[] }).nodes)) {
+    for (const node of (graph as { nodes: Array<Record<string, unknown>> }).nodes) {
+      node.priorArt = sanitizePriorArtHits(node.priorArt);
+    }
+  }
+
+  if (
+    insights &&
+    typeof insights === "object" &&
+    "priorArt" in insights &&
+    Array.isArray((insights as { priorArt?: unknown[] }).priorArt)
+  ) {
+    (insights as { priorArt: unknown[] }).priorArt = sanitizePriorArtHits(
+      (insights as { priorArt?: unknown[] }).priorArt,
+    );
+  }
+
   return graphSessionSchema.parse({
     id: row.id,
     seed: row.seed,
     domain: row.domain,
-    graph: row.graph,
-    insights: row.insights,
+    graph,
+    insights,
     onePager: row.one_pager,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
