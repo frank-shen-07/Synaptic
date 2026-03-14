@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { DismissibleNotice } from "@/components/dismissible-notice";
 import { getSupabaseBrowser } from "@/lib/integrations/supabase-browser";
 
 export default function ResetPasswordPage() {
@@ -82,8 +83,24 @@ export default function ResetPasswordPage() {
             />
           </label>
 
-          {message ? <p className="text-sm text-emerald-700">{message}</p> : null}
-          {error ? <p className="text-sm text-red-700">{error}</p> : null}
+          {message ? (
+            <DismissibleNotice
+              onClose={() => setMessage(null)}
+              className="border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
+              closeClassName="text-emerald-500 hover:bg-emerald-100 hover:text-emerald-700"
+            >
+              {message}
+            </DismissibleNotice>
+          ) : null}
+          {error ? (
+            <DismissibleNotice
+              onClose={() => setError(null)}
+              className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+              closeClassName="text-red-500 hover:bg-red-100 hover:text-red-700"
+            >
+              {error}
+            </DismissibleNotice>
+          ) : null}
 
           <button
             type="submit"

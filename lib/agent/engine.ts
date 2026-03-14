@@ -288,6 +288,67 @@ export async function crosscheckNode(session: GraphSession, nodeId: string) {
   return session;
 }
 
+export async function deleteNode(session: GraphSession, nodeId: string) {
+  const targetNode = session.graph.nodes.find((node) => node.id === nodeId);
+
+  if (!targetNode) {
+    return session;
+  }
+
+  if (targetNode.depth === 0 || targetNode.status === "seed") {
+    throw new Error("The seed node cannot be deleted.");
+  }
+
+  const nodeIdsToDelete = new Set<string>();
+  const queue = [nodeId];
+
+  while (queue.length > 0) {
+    const currentId = queue.shift();
+
+    if (!currentId || nodeIdsToDelete.has(currentId)) {
+      continue;
+    }
+
+    nodeIdsToDelete.add(currentId);
+
+    for (const node of session.graph.nodes) {
+      if (node.parentId === currentId) {
+        queue.push(node.id);
+      }
+    }
+  }
+
+  session.graph.nodes = session.graph.nodes.filter((node) => !nodeIdsToDelete.has(node.id));
+  session.graph.edges = session.graph.edges.filter(
+    (edge) => !nodeIdsToDelete.has(edge.source) && !nodeIdsToDelete.has(edge.target),
+  );
+
+  if (targetNode.parentId) {
+    const parentNode = session.graph.nodes.find((node) => node.id === targetNode.parentId);
+
+    if (parentNode) {
+      const remainingChildren = session.graph.nodes.filter((node) => node.parentId === parentNode.id);
+      parentNode.expandable = parentNode.depth + 1 < 3 && remainingChildren.length < MAX_CHILD_IDEAS;
+    }
+  }
+
+  session.insights = {
+    ...session.insights,
+    tensions: session.insights.tensions
+      .map((tension) => ({
+        ...tension,
+        nodeIds: tension.nodeIds.filter((id) => !nodeIdsToDelete.has(id)),
+      }))
+      .filter((tension) => tension.nodeIds.length >= 2),
+  };
+
+  session.onePager = null;
+  session.updatedAt = new Date().toISOString();
+  await refreshSessionInsights(session);
+
+  return session;
+}
+
 export async function generateOnePager(session: GraphSession): Promise<OnePager> {
   const onePager = await generateOnePagerWithAI(session);
   session.onePager = onePager;

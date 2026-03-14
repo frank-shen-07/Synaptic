@@ -16,6 +16,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
+import { DismissibleNotice } from "@/components/dismissible-notice";
+import { SYNAPTIC_THEME_STORAGE_KEY, usePersistedTheme } from "@/components/use-persisted-theme";
 import { getSupabaseBrowser } from "@/lib/integrations/supabase-browser";
 
 type Mode = "login" | "register";
@@ -65,21 +67,27 @@ function Field({
     <label className="block">
       <span className="sr-only">{label}</span>
       <div
-        className="flex items-center gap-3 rounded-[1rem] border border-slate-900/8 bg-[rgba(255,255,255,0.78)] px-4 text-slate-500 shadow-[0_10px_24px_rgba(15,23,42,0.06)]"
-        style={{ paddingBlock: compact ? "0.62rem" : "0.78rem" }}
+        className="flex items-center gap-3 rounded-[1rem] border px-4 shadow-[0_10px_24px_rgba(15,23,42,0.06)]"
+        style={{
+          borderColor: "var(--auth-field-border)",
+          background: "var(--auth-field-bg)",
+          color: "var(--auth-field-label)",
+          paddingBlock: compact ? "0.62rem" : "0.78rem",
+        }}
       >
-        <div className="shrink-0 text-slate-700">{icon}</div>
+        <div className="shrink-0" style={{ color: "var(--auth-field-icon)" }}>{icon}</div>
         <div className="min-w-0 flex-1">
-          <p className="text-[0.8rem] font-medium text-slate-500">{label}</p>
+          <p className="text-[0.8rem] font-medium" style={{ color: "var(--auth-field-label)" }}>{label}</p>
           <input
             type={type}
             value={value}
             onChange={(event) => onChange(event.target.value)}
             placeholder={placeholder}
-            className="mt-1 w-full bg-transparent text-[0.92rem] font-semibold text-slate-950 outline-none placeholder:text-slate-400"
+            className="mt-1 w-full bg-transparent text-[0.92rem] font-semibold outline-none placeholder:text-[var(--auth-field-placeholder)]"
+            style={{ color: "var(--auth-field-text)" }}
           />
         </div>
-        {trailing ? <div className="shrink-0 text-slate-700">{trailing}</div> : null}
+        {trailing ? <div className="shrink-0" style={{ color: "var(--auth-field-icon)" }}>{trailing}</div> : null}
       </div>
     </label>
   );
@@ -87,10 +95,10 @@ function Field({
 
 function Divider() {
   return (
-    <div className="flex items-center gap-4 text-sm text-slate-400">
-      <div className="h-px flex-1 bg-slate-300/80" />
+    <div className="flex items-center gap-4 text-sm" style={{ color: "var(--auth-text-soft)" }}>
+      <div className="h-px flex-1" style={{ background: "var(--auth-divider)" }} />
       <span>or</span>
-      <div className="h-px flex-1 bg-slate-300/80" />
+      <div className="h-px flex-1" style={{ background: "var(--auth-divider)" }} />
     </div>
   );
 }
@@ -137,15 +145,25 @@ function SwitchPrompt({
   return (
     <div className="w-full max-w-[30rem] text-center">
       <h2
-        className="mx-auto max-w-[28rem] font-semibold tracking-[-0.05em] text-slate-900"
-        style={{ fontSize: "clamp(2rem, 1.3rem + 1.25vw, 3rem)", lineHeight: 1.05 }}
+        className="mx-auto max-w-[28rem] font-semibold tracking-[-0.05em]"
+        style={{
+          color: "var(--auth-text)",
+          fontSize: "clamp(2rem, 1.3rem + 1.25vw, 3rem)",
+          lineHeight: 1.05,
+        }}
       >
         {title}
       </h2>
       <button
         type="button"
         onClick={onClick}
-        className="mx-auto mt-8 flex h-[4.7rem] w-full max-w-[25rem] items-center justify-center rounded-[1.05rem] bg-slate-950 text-[1.35rem] font-semibold text-white shadow-[0_18px_38px_rgba(15,23,42,0.18)] transition hover:bg-slate-800"
+        className="mx-auto mt-8 flex h-[4.7rem] w-full max-w-[25rem] items-center justify-center rounded-[1.05rem] font-semibold transition"
+        style={{
+          background: "var(--auth-primary-bg)",
+          color: "var(--auth-primary-text)",
+          boxShadow: "0 18px 38px color-mix(in srgb, var(--auth-primary-bg) 24%, transparent)",
+          fontSize: "1.35rem",
+        }}
       >
         {buttonLabel}
       </button>
@@ -206,24 +224,28 @@ function AuthFormCard({
 
   return (
     <div
-      className="w-full max-w-[31.5rem] rounded-[1.65rem] border border-white/70 bg-[linear-gradient(180deg,rgba(255,253,249,0.96),rgba(249,243,235,0.92))] shadow-[0_24px_54px_rgba(15,23,42,0.12)]"
+      className="w-full max-w-[31.5rem] rounded-[1.65rem] border"
       style={{
+        background: "var(--auth-card-bg)",
+        borderColor: "var(--auth-card-border)",
+        boxShadow: "var(--auth-card-shadow)",
         paddingInline: "clamp(1.1rem, 1.7vw, 1.6rem)",
         paddingBlock: isLogin ? "clamp(1.2rem, 1.7vh, 1.8rem)" : "clamp(0.9rem, 1.3vh, 1.2rem)",
       }}
     >
       <div className="text-center">
         <p
-          className="font-semibold leading-none tracking-[-0.04em] text-slate-900"
-          style={{ fontSize: isLogin ? "clamp(1.9rem, 1.3rem + 0.9vw, 2.45rem)" : "clamp(1.45rem, 1.1rem + 0.55vw, 1.9rem)" }}
+          className="font-semibold leading-none tracking-[-0.04em]"
+          style={{ color: "var(--auth-text-muted)", fontSize: isLogin ? "clamp(1.9rem, 1.3rem + 0.9vw, 2.45rem)" : "clamp(1.45rem, 1.1rem + 0.55vw, 1.9rem)" }}
         >
           Welcome to
         </p>
         <h1
-          className="mt-2 font-semibold leading-none tracking-[-0.06em] text-slate-950"
+          className="mt-2 font-semibold leading-none tracking-[-0.06em]"
           style={{
             fontFamily: "var(--font-display)",
             fontSize: isLogin ? "clamp(2.7rem, 1.95rem + 1.35vw, 3.6rem)" : "clamp(2.1rem, 1.6rem + 0.85vw, 2.6rem)",
+            color: "var(--auth-text)",
           }}
         >
           Synaptic
@@ -261,7 +283,12 @@ function AuthFormCard({
           onChange={setPassword}
           compact={!isLogin}
           trailing={
-            <button type="button" onClick={() => setShowPassword((value) => !value)} className="transition hover:text-slate-950">
+            <button
+              type="button"
+              onClick={() => setShowPassword((value) => !value)}
+              className="transition"
+              style={{ color: "var(--auth-field-icon)" }}
+            >
               {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
             </button>
           }
@@ -277,7 +304,12 @@ function AuthFormCard({
             onChange={setConfirmPassword}
             compact
             trailing={
-              <button type="button" onClick={() => setShowConfirmPassword((value) => !value)} className="transition hover:text-slate-950">
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword((value) => !value)}
+                className="transition"
+                style={{ color: "var(--auth-field-icon)" }}
+              >
                 {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
               </button>
             }
@@ -285,11 +317,18 @@ function AuthFormCard({
         ) : null}
 
         {isLogin ? (
-          <div className="flex items-center justify-between gap-4 text-[0.92rem] text-slate-700">
-            <button type="button" onClick={() => setRememberMe((value) => !value)} className="inline-flex items-center gap-3 transition hover:text-slate-950">
-              <span className="text-slate-500">
+          <div className="flex items-center justify-between gap-4 text-[0.92rem]" style={{ color: "var(--auth-text-muted)" }}>
+            <button type="button" onClick={() => setRememberMe((value) => !value)} className="inline-flex items-center gap-3 transition" style={{ color: "var(--auth-text-muted)" }}>
+              <span style={{ color: "var(--auth-text-soft)" }}>
                 {rememberMe ? (
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-[5px] border border-slate-500 bg-slate-900 text-[14px] text-white">
+                  <span
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-[5px] border text-[14px]"
+                    style={{
+                      borderColor: "var(--auth-primary-bg)",
+                      background: "var(--auth-primary-bg)",
+                      color: "var(--auth-primary-text)",
+                    }}
+                  >
                     ✓
                   </span>
                 ) : (
@@ -299,15 +338,22 @@ function AuthFormCard({
               Remember me
             </button>
 
-            <button type="button" onClick={handleForgotPassword} disabled={isPending} className="font-semibold text-slate-900 transition hover:text-slate-700 disabled:opacity-60">
+            <button type="button" onClick={handleForgotPassword} disabled={isPending} className="font-semibold transition disabled:opacity-60" style={{ color: "var(--auth-text)" }}>
               Forgot password?
             </button>
           </div>
         ) : (
-          <button type="button" onClick={() => setAcceptedTerms((value) => !value)} className="inline-flex items-start gap-3 text-left text-[0.82rem] leading-snug text-slate-700 transition hover:text-slate-950">
-            <span className="mt-0.5 text-slate-500">
+          <button type="button" onClick={() => setAcceptedTerms((value) => !value)} className="inline-flex items-start gap-3 text-left text-[0.82rem] leading-snug transition" style={{ color: "var(--auth-text-muted)" }}>
+            <span className="mt-0.5" style={{ color: "var(--auth-text-soft)" }}>
               {acceptedTerms ? (
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-[5px] border border-slate-500 bg-slate-900 text-[14px] text-white">
+                <span
+                  className="inline-flex h-5 w-5 items-center justify-center rounded-[5px] border text-[14px]"
+                  style={{
+                    borderColor: "var(--auth-primary-bg)",
+                    background: "var(--auth-primary-bg)",
+                    color: "var(--auth-primary-text)",
+                  }}
+                >
                   ✓
                 </span>
               ) : (
@@ -315,7 +361,7 @@ function AuthFormCard({
               )}
             </span>
             <span>
-              I have read and agree to the <span className="font-semibold text-slate-900">Disclaimer</span>.
+              I have read and agree to the <span className="font-semibold" style={{ color: "var(--auth-text)" }}>Disclaimer</span>.
             </span>
           </button>
         )}
@@ -324,10 +370,13 @@ function AuthFormCard({
           type="button"
           onClick={handleEmailAuth}
           disabled={isPending}
-          className="flex w-full items-center justify-center rounded-[14px] bg-slate-950 font-semibold text-white shadow-[0_16px_34px_rgba(15,23,42,0.18)] transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-70"
+          className="flex w-full items-center justify-center rounded-[14px] font-semibold transition disabled:cursor-wait disabled:opacity-70"
           style={{
+            background: "var(--auth-primary-bg)",
+            color: "var(--auth-primary-text)",
             height: isLogin ? "3.95rem" : "3.15rem",
             fontSize: isLogin ? "1.12rem" : "1rem",
+            boxShadow: "0 16px 34px color-mix(in srgb, var(--auth-primary-bg) 24%, transparent)",
           }}
         >
           {isPending ? <LoaderCircle className="h-6 w-6 animate-spin" /> : isLogin ? "Login" : "Register"}
@@ -339,18 +388,38 @@ function AuthFormCard({
           type="button"
           onClick={handleGoogle}
           disabled={isPending}
-          className="flex w-full items-center justify-center gap-3 rounded-[14px] border border-slate-900/10 bg-white/82 font-semibold text-slate-900 shadow-[0_8px_20px_rgba(15,23,42,0.08)] transition hover:bg-white disabled:cursor-wait disabled:opacity-70"
+          className="flex w-full items-center justify-center gap-3 rounded-[14px] border font-semibold transition disabled:cursor-wait disabled:opacity-70"
           style={{
+            background: "var(--auth-secondary-bg)",
+            borderColor: "var(--auth-secondary-border)",
+            color: "var(--auth-secondary-text)",
             height: isLogin ? "3.55rem" : "3.05rem",
             fontSize: isLogin ? "0.96rem" : "0.9rem",
+            boxShadow: "0 8px 20px color-mix(in srgb, var(--auth-text) 8%, transparent)",
           }}
         >
           <GoogleMark />
           {isLogin ? "Continue with Google" : "Join with Google"}
         </button>
 
-        {message ? <p className="text-center text-sm font-semibold text-emerald-700">{message}</p> : null}
-        {error ? <p className="text-center text-sm font-semibold text-red-700">{error}</p> : null}
+        {message ? (
+          <DismissibleNotice
+            onClose={() => setMessage(null)}
+            className="border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700"
+            closeClassName="text-emerald-500 hover:bg-emerald-100 hover:text-emerald-700"
+          >
+            {message}
+          </DismissibleNotice>
+        ) : null}
+        {error ? (
+          <DismissibleNotice
+            onClose={() => setError(null)}
+            className="border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700"
+            closeClassName="text-red-500 hover:bg-red-100 hover:text-red-700"
+          >
+            {error}
+          </DismissibleNotice>
+        ) : null}
       </div>
     </div>
   );
@@ -405,14 +474,15 @@ function MobileStack({
     <div className="px-5 pb-10 pt-24 md:hidden">
       <div className="mx-auto flex w-full max-w-[42rem] flex-col gap-6">
         {card}
-        <div className="rounded-[1rem] border border-slate-900/8 bg-white/65 p-4 text-center">
-          <h2 className="text-[1.4rem] font-semibold text-slate-900">
+        <div className="rounded-[1rem] border p-4 text-center" style={{ borderColor: "var(--auth-field-border)", background: "var(--auth-mobile-card-bg)" }}>
+          <h2 className="text-[1.4rem] font-semibold" style={{ color: "var(--auth-text)" }}>
             {isLogin ? "Don't have an account?" : "Already have an account?"}
           </h2>
           <button
             type="button"
             onClick={() => onSwitch(isLogin ? "register" : "login")}
-            className="mt-4 flex h-12 w-full items-center justify-center rounded-[12px] bg-slate-950 text-base font-semibold text-white transition hover:bg-slate-800"
+            className="mt-4 flex h-12 w-full items-center justify-center rounded-[12px] text-base font-semibold transition"
+            style={{ background: "var(--auth-primary-bg)", color: "var(--auth-primary-text)" }}
           >
             {isLogin ? "Register" : "Login"}
           </button>
@@ -426,6 +496,7 @@ export function AuthShell() {
   const searchParams = useSearchParams();
   const next = searchParams.get("next") || "/workspace";
   const oauthNext = useMemo(() => `/auth/callback?next=${encodeURIComponent(next)}`, [next]);
+  const { theme } = usePersistedTheme(SYNAPTIC_THEME_STORAGE_KEY);
 
   const [mode, setMode] = useState<Mode>("login");
   const [fullName, setFullName] = useState("");
@@ -579,11 +650,28 @@ export function AuthShell() {
   );
 
   return (
-    <main className="min-h-screen w-full px-3 py-3 md:px-4 md:py-4" style={{ fontFamily: "var(--font-display)" }}>
-      <div className="glass-panel relative min-h-[calc(100dvh-1.5rem)] overflow-hidden rounded-[2rem] border border-white/60 md:min-h-[calc(100dvh-2rem)]">
+    <main
+      className="auth-theme min-h-screen w-full px-3 py-3 md:px-4 md:py-4"
+      data-theme={theme}
+      style={{ fontFamily: "var(--font-display)" }}
+    >
+      <div
+        className="glass-panel relative min-h-[calc(100dvh-1.5rem)] overflow-hidden rounded-[2rem] border md:min-h-[calc(100dvh-2rem)]"
+        style={{
+          borderColor: "var(--auth-shell-border)",
+          boxShadow: "var(--auth-panel-shadow)",
+          background: "var(--auth-shell-bg)",
+        }}
+      >
         <Link
           href="/"
-          className="absolute left-6 top-6 z-30 inline-flex h-14 w-14 items-center justify-center rounded-full border border-white/70 bg-white/72 text-slate-900 shadow-[0_12px_30px_rgba(15,23,42,0.1)] transition hover:bg-white"
+          className="button-feel absolute left-6 top-6 z-30 inline-flex h-14 w-14 items-center justify-center rounded-full border transition"
+          style={{
+            borderColor: "var(--auth-home-border)",
+            background: "var(--auth-home-bg)",
+            color: "var(--auth-home-text)",
+            boxShadow: "0 12px 30px color-mix(in srgb, var(--auth-text) 10%, transparent)",
+          }}
         >
           <Home className="h-6 w-6" />
         </Link>

@@ -2,7 +2,8 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 
-type Theme = "light" | "dark";
+export type Theme = "light" | "dark";
+export const SYNAPTIC_THEME_STORAGE_KEY = "synaptic-workbench-theme";
 const THEME_EVENT_NAME = "synaptic-theme-change";
 
 function readTheme(storageKey: string): Theme {

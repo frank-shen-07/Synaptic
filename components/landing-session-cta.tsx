@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { DismissibleNotice } from "@/components/dismissible-notice";
+
 export function LandingSessionCta({ signedIn }: { signedIn: boolean }) {
   const router = useRouter();
   const [seed, setSeed] = useState("");
@@ -51,21 +53,21 @@ export function LandingSessionCta({ signedIn }: { signedIn: boolean }) {
           disabled
           value=""
           placeholder="e.g. Decentralized social graph..."
-          className="w-full max-w-[22rem] rounded-full border px-6 py-3 text-sm outline-none md:w-[22rem]"
+          className="w-full max-w-[22rem] rounded-full border px-6 py-3 text-sm outline-none placeholder:text-[var(--landing-text-muted)] md:w-[22rem]"
           style={{
-            borderColor: "rgba(22, 17, 11, 0.1)",
-            background: "#f5f2ee",
-            color: "#16110b",
+            borderColor: "var(--landing-line)",
+            background: "var(--landing-panel-strong)",
+            color: "var(--landing-text)",
           }}
         />
         <Link
           href="/auth"
-          className="inline-flex items-center justify-center rounded-full border px-7 py-3 text-[0.72rem] uppercase tracking-[0.14em] transition hover:-translate-y-0.5"
+          className="button-feel inline-flex items-center justify-center rounded-full border px-7 py-3 text-[0.72rem] uppercase tracking-[0.14em] transition hover:-translate-y-0.5"
           style={{
             fontFamily: "var(--font-landing-mono)",
-            background: "#16110b",
-            borderColor: "#16110b",
-            color: "#f5f2ee",
+            background: "var(--landing-primary-bg)",
+            borderColor: "var(--landing-primary-bg)",
+            color: "var(--landing-primary-text)",
           }}
         >
           Sign in to start
@@ -82,11 +84,11 @@ export function LandingSessionCta({ signedIn }: { signedIn: boolean }) {
           value={seed}
           onChange={(event) => setSeed(event.target.value)}
           placeholder="e.g. Decentralized social graph..."
-          className="w-full max-w-[22rem] rounded-full border px-6 py-3 text-sm outline-none transition focus:ring-4 md:w-[22rem]"
+          className="w-full max-w-[22rem] rounded-full border px-6 py-3 text-sm outline-none transition placeholder:text-[var(--landing-text-muted)] focus:ring-4 md:w-[22rem]"
           style={{
-            borderColor: "rgba(22, 17, 11, 0.1)",
-            background: "#f5f2ee",
-            color: "#16110b",
+            borderColor: "var(--landing-line)",
+            background: "var(--landing-panel-strong)",
+            color: "var(--landing-text)",
             boxShadow: "0 0 0 0 rgba(22,17,11,0)",
           }}
         />
@@ -96,9 +98,9 @@ export function LandingSessionCta({ signedIn }: { signedIn: boolean }) {
           className="inline-flex items-center justify-center rounded-full border px-7 py-3 text-[0.72rem] uppercase tracking-[0.14em] transition hover:-translate-y-0.5 disabled:translate-y-0 disabled:opacity-70"
           style={{
             fontFamily: "var(--font-landing-mono)",
-            background: "#16110b",
-            borderColor: "#16110b",
-            color: "#f5f2ee",
+            background: "var(--landing-primary-bg)",
+            borderColor: "var(--landing-primary-bg)",
+            color: "var(--landing-primary-text)",
           }}
         >
           {isPending ? "Generating..." : "Generate Graph ->"}
@@ -106,9 +108,13 @@ export function LandingSessionCta({ signedIn }: { signedIn: boolean }) {
       </div>
 
       {error ? (
-        <p className="text-center text-sm" style={{ color: "#8a8278" }}>
-          {error}
-        </p>
+        <DismissibleNotice
+          onClose={() => setError(null)}
+          className="border px-3 py-2 text-center text-sm"
+          closeClassName="hover:bg-black/5"
+        >
+          <span style={{ color: "var(--landing-text-muted)" }}>{error}</span>
+        </DismissibleNotice>
       ) : null}
     </form>
   );

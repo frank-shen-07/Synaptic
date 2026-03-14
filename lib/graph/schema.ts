@@ -126,6 +126,10 @@ export const crosscheckNodeInputSchema = z.object({
   nodeId: z.string(),
 });
 
+export const deleteNodeInputSchema = z.object({
+  nodeId: z.string(),
+});
+
 export type ClusterType = (typeof clusterTypes)[number];
 export type NodeDetails = z.infer<typeof nodeDetailsSchema>;
 export type GraphNodeRecord = z.infer<typeof graphNodeSchema>;
@@ -137,3 +141,4 @@ export type GraphSession = z.infer<typeof graphSessionSchema>;
 export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
 export type ExpandNodeInput = z.infer<typeof expandNodeInputSchema>;
 export type CrosscheckNodeInput = z.infer<typeof crosscheckNodeInputSchema>;
+export type DeleteNodeInput = z.infer<typeof deleteNodeInputSchema>;

@@ -7,31 +7,9 @@ import type { GraphNodeRecord, GraphEdgeRecord } from "@/lib/graph/schema";
 
 type GraphTheme = "light" | "dark";
 
-const NODE_PALETTES: Record<GraphTheme, Record<GraphNodeRecord["type"], string>> = {
-  light: {
-    seed: "#0f766e",
-    inspiration: "#1f8a70",
-    target_audience: "#2563eb",
-    technical_constraints: "#d97706",
-    business_constraints: "#7c3aed",
-    risks_failure_modes: "#dc2626",
-    prior_art: "#a16207",
-    adjacent_analogies: "#4f46e5",
-    open_questions: "#64748b",
-    tensions: "#be185d",
-  },
-  dark: {
-    seed: "#63d1c4",
-    inspiration: "#7ce0c8",
-    target_audience: "#86c7ff",
-    technical_constraints: "#ffb85c",
-    business_constraints: "#d6a8ff",
-    risks_failure_modes: "#ff9287",
-    prior_art: "#fbd44b",
-    adjacent_analogies: "#a8b8ff",
-    open_questions: "#b3c0d1",
-    tensions: "#ff9cbc",
-  },
+const DEPTH_PALETTES: Record<GraphTheme, string[]> = {
+  light: ["#0f766e", "#2563eb", "#d97706", "#be185d"],
+  dark: ["#63d1c4", "#86c7ff", "#ffb85c", "#ff9cbc"],
 };
 
 type Rgb = {
@@ -133,6 +111,12 @@ function getNodeOpacity(record: GraphNodeRecord) {
   return 0.50;
 }
 
+function getDepthColor(depth: number, theme: GraphTheme) {
+  const palette = DEPTH_PALETTES[theme];
+  const index = Math.max(0, Math.min(depth, palette.length - 1));
+  return palette[index];
+}
+
 function rectContainsPoint(rect: LabelRect, x: number, y: number) {
   return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
 }
@@ -208,6 +192,79 @@ function lineIntersectsRect(
   );
 }
 
+function trimTextToWidth(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+) {
+  if (ctx.measureText(text).width <= maxWidth) {
+    return text;
+  }
+
+  let trimmed = text.trim();
+
+  while (trimmed.length > 0 && ctx.measureText(`${trimmed}…`).width > maxWidth) {
+    trimmed = trimmed.slice(0, -1).trimEnd();
+  }
+
+  return trimmed ? `${trimmed}…` : "…";
+}
+
+function wrapCanvasText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxLines: number,
+) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+
+  if (words.length === 0) {
+    return [];
+  }
+
+  const lines: string[] = [];
+  let currentLine = "";
+
+  for (const word of words) {
+    const nextLine = currentLine ? `${currentLine} ${word}` : word;
+
+    if (ctx.measureText(nextLine).width <= maxWidth) {
+      currentLine = nextLine;
+      continue;
+    }
+
+    if (!currentLine) {
+      lines.push(trimTextToWidth(ctx, word, maxWidth));
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+
+    if (lines.length === maxLines) {
+      return lines;
+    }
+  }
+
+  if (currentLine && lines.length < maxLines) {
+    lines.push(currentLine);
+  }
+
+  if (currentLine && lines.length === maxLines && ctx.measureText(currentLine).width > maxWidth) {
+    lines[maxLines - 1] = trimTextToWidth(ctx, currentLine, maxWidth);
+  }
+
+  if (words.length > 0 && lines.length === maxLines) {
+    const rendered = lines.join(" ").replace(/…$/, "").trim();
+    const original = words.join(" ").trim();
+
+    if (rendered.length < original.length) {
+      lines[maxLines - 1] = trimTextToWidth(ctx, lines[maxLines - 1], maxWidth);
+    }
+  }
+
+  return lines;
+}
+
 function getGraphBounds(simNodes: SimNode[]): GraphBounds | null {
   const positionedNodes = simNodes.filter((node) => node.x != null && node.y != null);
 
@@ -280,7 +337,6 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
     const simNodes = simNodesRef.current;
     const hovered = hoveredRef.current;
     const selectedId = selectedIdRef.current;
-    const basePalette = NODE_PALETTES[theme];
     const themeTint = theme === "dark" ? "#f8fafc" : "#10253d";
     const labelColor = theme === "dark" ? "rgba(224, 231, 241, 0.84)" : "rgba(23, 32, 51, 0.76)";
     const tooltipBackground = theme === "dark" ? "rgba(6, 12, 20, 0.95)" : "rgba(17, 28, 43, 0.94)";
@@ -301,25 +357,7 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
       const cached = resolvedColors.get(node.id);
       if (cached) return cached;
 
-      const baseColor = basePalette[node.record.type];
-
-      if (!node.record.parentId) {
-        resolvedColors.set(node.id, baseColor);
-        return baseColor;
-      }
-
-      const parent = nodeMap.get(node.record.parentId);
-      if (!parent) {
-        resolvedColors.set(node.id, baseColor);
-        return baseColor;
-      }
-
-      const parentColor = resolveNodeColor(parent);
-      const branchMix = node.record.generated ? 0.44 : 0.28;
-      const depthTint = Math.min(node.record.depth * 0.06, 0.18);
-      const relatedColor = mixColor(baseColor, parentColor, branchMix);
-      const finalColor = mixColor(relatedColor, themeTint, depthTint);
-
+      const finalColor = mixColor(getDepthColor(node.record.depth, theme), themeTint, Math.min(node.record.depth * 0.04, 0.12));
       resolvedColors.set(node.id, finalColor);
       return finalColor;
     };
@@ -522,14 +560,51 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
     if (hovered && hovered.x != null && hovered.y != null) {
       const sx = hovered.x * k + x;
       const sy = hovered.y * k + y;
-      const color = resolvedColors.get(hovered.id) ?? basePalette[hovered.record.type];
+      const color = resolvedColors.get(hovered.id) ?? getDepthColor(hovered.record.depth, theme);
       const hasSummary = Boolean(hovered.record.summary);
-      const bw = 186;
-      const bh = hasSummary ? 72 : 48;
-      const bx = Math.min(sx + 14, W - bw - 8);
+      const bw = 220;
+      const paddingX = 12;
+      const topPadding = 14;
+      const blockGap = 7;
+      const bottomPadding = 12;
+      const centerX = Math.max(bw / 2 + 8, Math.min(sx + 14 + bw / 2, W - bw / 2 - 8));
+      const maxTextWidth = bw - paddingX * 2;
+
+      ctx.textAlign = "center";
+      ctx.fillStyle = tooltipBackground;
+
+      ctx.font = "600 10px system-ui, sans-serif";
+      const typeLine = hovered.record.type.replace(/_/g, " ");
+
+      ctx.font = "600 12px system-ui, sans-serif";
+      const titleLines = wrapCanvasText(ctx, hovered.record.label, maxTextWidth, 2);
+      const titleLineHeight = 15;
+
+      ctx.font = "400 10px system-ui, sans-serif";
+      const summaryLines = hasSummary
+        ? wrapCanvasText(ctx, hovered.record.summary, maxTextWidth, 2)
+        : [];
+      const summaryLineHeight = 13;
+
+      ctx.font = "400 9px system-ui, sans-serif";
+      const hintLine = "click to explore →";
+
+      const typeHeight = 10;
+      const titleHeight = titleLines.length * titleLineHeight;
+      const summaryHeight = summaryLines.length * summaryLineHeight;
+      const hintHeight = 9;
+      const bh =
+        topPadding +
+        typeHeight +
+        blockGap +
+        titleHeight +
+        (summaryLines.length > 0 ? blockGap + summaryHeight : 0) +
+        blockGap +
+        hintHeight +
+        bottomPadding;
+      const bx = centerX - bw / 2;
       const by = Math.max(sy - bh - 12, 8);
 
-      ctx.fillStyle = tooltipBackground;
       ctx.beginPath();
       if (ctx.roundRect) {
         ctx.roundRect(bx, by, bw, bh, 10);
@@ -540,31 +615,31 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
 
       ctx.font = "600 10px system-ui, sans-serif";
       ctx.fillStyle = color;
-      ctx.textAlign = "left";
-      ctx.fillText(hovered.record.type.replace(/_/g, " "), bx + 10, by + 16);
+      let textY = by + topPadding;
+      ctx.fillText(typeLine, centerX, textY);
 
-      ctx.font = "500 12px system-ui, sans-serif";
+      ctx.font = "600 12px system-ui, sans-serif";
       ctx.fillStyle = tooltipBody;
-      const title = hovered.record.label.length > 24
-        ? hovered.record.label.slice(0, 24) + "…"
-        : hovered.record.label;
-      ctx.fillText(title, bx + 10, by + 33);
+      textY += typeHeight + blockGap;
+      for (const line of titleLines) {
+        ctx.fillText(line, centerX, textY);
+        textY += titleLineHeight;
+      }
 
-      if (hasSummary) {
-        const summary = hovered.record.summary.length > 40
-          ? hovered.record.summary.slice(0, 40) + "…"
-          : hovered.record.summary;
+      if (summaryLines.length > 0) {
         ctx.font = "400 10px system-ui, sans-serif";
         ctx.fillStyle = tooltipMuted;
-        ctx.fillText(summary, bx + 10, by + 50);
-        ctx.font = "400 9px system-ui, sans-serif";
-        ctx.fillStyle = tooltipHint;
-        ctx.fillText("click to explore →", bx + 10, by + 66);
-      } else {
-        ctx.font = "400 9px system-ui, sans-serif";
-        ctx.fillStyle = tooltipHint;
-        ctx.fillText("click to explore →", bx + 10, by + 47);
+        textY += blockGap;
+        for (const line of summaryLines) {
+          ctx.fillText(line, centerX, textY);
+          textY += summaryLineHeight;
+        }
       }
+
+      ctx.font = "400 9px system-ui, sans-serif";
+      ctx.fillStyle = tooltipHint;
+      ctx.fillText(hintLine, centerX, by + bh - bottomPadding);
+      ctx.textAlign = "left";
     }
   }, [edges, theme]);
 

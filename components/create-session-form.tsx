@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
+import { DismissibleNotice } from "@/components/dismissible-notice";
+
 const LOADING_PHRASES = [
   "Searching ideas",
   "Mapping connections",
@@ -116,7 +118,15 @@ export function CreateSessionForm() {
         />
       </label>
 
-      {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {error ? (
+        <DismissibleNotice
+          onClose={() => setError(null)}
+          className="border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          closeClassName="text-red-500 hover:bg-red-100 hover:text-red-700"
+        >
+          {error}
+        </DismissibleNotice>
+      ) : null}
 
       <button
         type="submit"

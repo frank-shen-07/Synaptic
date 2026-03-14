@@ -11,15 +11,18 @@ import {
   Search,
   Sparkles,
   SunMedium,
+  Trash2,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useState, useTransition } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, useTransition } from "react";
 
+import { DismissibleNotice } from "./dismissible-notice";
 import { ForceGraph } from "./force-graph";
-import { usePersistedTheme } from "./use-persisted-theme";
+import { SYNAPTIC_THEME_STORAGE_KEY, usePersistedTheme } from "./use-persisted-theme";
 import type { GraphNodeRecord, GraphSession } from "@/lib/graph/schema";
+import { formatUtcTimestamp } from "@/lib/utils";
 
 type GraphWorkbenchProps = {
   initialSession: GraphSession;
@@ -27,7 +30,7 @@ type GraphWorkbenchProps = {
 
 type WorkbenchTheme = "light" | "dark";
 
-type ProcessingKind = "expand" | "crosscheck" | "onepager";
+type ProcessingKind = "expand" | "crosscheck" | "onepager" | "delete";
 
 type ProcessingState = {
   kind: ProcessingKind;
@@ -108,6 +111,16 @@ function getProcessingCopy(state: ProcessingState | null) {
     };
   }
 
+  if (state.kind === "delete") {
+    return {
+      title: "Deleting branch",
+      detail: state.nodeLabel
+        ? `We are removing ${state.nodeLabel} and any dependent child ideas.`
+        : "We are removing the selected branch.",
+      animationText: "Pruning graph branch",
+    };
+  }
+
   return {
     title: "Building one-pager",
     detail: "We are shaping the current graph into a concise exportable brief.",
@@ -116,6 +129,17 @@ function getProcessingCopy(state: ProcessingState | null) {
 }
 
 function TypingStatus({ text }: { text: string }) {
+  const measureRef = useRef<HTMLSpanElement>(null);
+  const [typingWidth, setTypingWidth] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    if (!measureRef.current) {
+      return;
+    }
+
+    setTypingWidth(measureRef.current.getBoundingClientRect().width);
+  }, [text]);
+
   return (
     <span
       className="typing-status"
@@ -123,9 +147,13 @@ function TypingStatus({ text }: { text: string }) {
         {
           "--characters": text.length,
           "--typing-duration": `${Math.max(3.4, text.length * 0.12)}s`,
+          "--typing-width": typingWidth ? `${typingWidth}px` : undefined,
         } as React.CSSProperties
       }
     >
+      <span ref={measureRef} className="typing-status__measure" aria-hidden="true">
+        {text}
+      </span>
       <span className="typing-status__text">{text}</span>
     </span>
   );
@@ -137,7 +165,7 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
     initialSession.graph.nodes[0]?.id ?? null,
   );
-  const { theme, setTheme } = usePersistedTheme("synaptic-workbench-theme");
+  const { theme, setTheme } = usePersistedTheme(SYNAPTIC_THEME_STORAGE_KEY);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [processingState, setProcessingState] = useState<ProcessingState | null>(null);
@@ -154,11 +182,31 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
     setIsModalOpen(true);
   }, []);
 
+  const getFallbackNodeId = useCallback(
+    (nextSession: GraphSession, removedNode: GraphNodeRecord | null) => {
+      if (!removedNode) {
+        return nextSession.graph.nodes.find((node) => node.type === "seed")?.id ?? null;
+      }
+
+      if (removedNode.parentId) {
+        const parent = nextSession.graph.nodes.find((node) => node.id === removedNode.parentId);
+
+        if (parent) {
+          return parent.id;
+        }
+      }
+
+      return nextSession.graph.nodes.find((node) => node.type === "seed")?.id ?? null;
+    },
+    [],
+  );
+
   async function mutateSession(
     endpoint: string,
     body?: Record<string, string>,
     fallbackMessage?: string,
     processingKind: ProcessingKind = "expand",
+    onSuccess?: (payload: GraphSession) => void,
   ) {
     setNotice(null);
     setProcessingState({ kind: processingKind, nodeLabel: selectedNode?.label });
@@ -183,6 +231,7 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
       startTransition(() => {
         setSession(payload);
       });
+      onSuccess?.(payload);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : fallbackMessage ?? "Request failed.");
     } finally {
@@ -340,12 +389,13 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
         </header>
 
       {notice ? (
-        <div
-          className="glass-panel rounded-[1.4rem] px-5 py-3 text-sm text-[var(--foreground-muted)]"
-          style={{ fontFamily: "var(--font-body)" }}
+        <DismissibleNotice
+          onClose={() => setNotice(null)}
+          className="glass-panel px-5 py-3 text-sm text-[var(--foreground-muted)]"
+          closeClassName="text-[var(--foreground-soft)] hover:bg-[var(--button-secondary)] hover:text-[var(--foreground)]"
         >
-          {notice}
-        </div>
+          <div style={{ fontFamily: "var(--font-body)" }}>{notice}</div>
+        </DismissibleNotice>
       ) : null}
 
       <section className="glass-panel relative overflow-hidden rounded-[2rem]">
@@ -419,11 +469,9 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
                   {selectedNode.depth === 0 ? "Seed node" : `Depth ${selectedNode.depth} idea`}
                 </p>
                 <h2
-                  className="mt-3 inline-block rounded-[1.4rem] px-3 py-2 text-4xl leading-tight text-[var(--foreground)]"
+                  className="mt-3 text-4xl leading-tight text-[var(--foreground)]"
                   style={{
                     fontFamily: "var(--font-display)",
-                    background: `linear-gradient(120deg, color-mix(in srgb, ${nodeAccent} 20%, transparent), transparent 72%)`,
-                    boxShadow: titleGlow,
                   }}
                 >
                   {selectedNode.label}
@@ -456,7 +504,7 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
                     color: "var(--result-chip-text)",
                   }}
                 >
-                  Cross-checked {new Date(selectedNode.crosscheckedAt).toLocaleString()}
+                  Cross-checked {formatUtcTimestamp(selectedNode.crosscheckedAt)}
                 </span>
               ) : null}
             </div>
@@ -494,6 +542,29 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
                 <Search className="h-4 w-4" />
                 Cross-check for existing similar ideas
               </button>
+              {selectedNode.depth > 0 ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    mutateSession(
+                      `/api/sessions/${session.id}/delete`,
+                      { nodeId: selectedNode.id },
+                      "Could not delete node.",
+                      "delete",
+                      (payload) => {
+                        setSelectedNodeId(getFallbackNodeId(payload, selectedNode));
+                        setIsModalOpen(false);
+                        setNotice("Node deleted.");
+                      },
+                    )
+                  }
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] bg-[color:var(--card-strong)] px-4 py-3 text-sm font-semibold text-[var(--foreground)] transition hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-wait disabled:opacity-60"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete node
+                </button>
+              ) : null}
             </div>
 
             {processingCopy && processingState?.kind !== "onepager" ? (
