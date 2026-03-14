@@ -193,7 +193,9 @@ function AuthFormCard({
   handleEmailAuth,
   handleGoogle,
   message,
+  setMessage,
   error,
+  setError,
   isPending,
 }: {
   mode: Mode;
@@ -217,7 +219,9 @@ function AuthFormCard({
   handleEmailAuth: () => void;
   handleGoogle: () => void;
   message: string | null;
+  setMessage: (value: string | null) => void;
   error: string | null;
+  setError: (value: string | null) => void;
   isPending: boolean;
 }) {
   const isLogin = mode === "login";
@@ -644,7 +648,9 @@ export function AuthShell() {
       handleEmailAuth={handleEmailAuth}
       handleGoogle={handleGoogle}
       message={message}
+      setMessage={setMessage}
       error={error}
+      setError={setError}
       isPending={isPending}
     />
   );

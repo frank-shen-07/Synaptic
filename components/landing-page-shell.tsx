@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowRight, FileText, GitBranch, MoonStar, Search, ShieldAlert, Sparkles, SunMedium } from "lucide-react";
+import type { Route } from "next";
 import Link from "next/link";
 
 import { LandingSessionCta } from "@/components/landing-session-cta";
@@ -215,7 +216,7 @@ function GraphPreview() {
 
 type LandingPageShellProps = {
   fontClassName: string;
-  workspaceHref: string;
+  workspaceHref: Route;
 };
 
 export function LandingPageShell({ fontClassName, workspaceHref }: LandingPageShellProps) {
