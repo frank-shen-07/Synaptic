@@ -11,7 +11,7 @@ import {
   useNodesState,
 } from "@xyflow/react";
 import { jsPDF } from "jspdf";
-import { ArrowRight, Copy, Download, Search, Sparkles, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Copy, Download, Search, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
@@ -172,9 +172,19 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
       <header className="glass-panel rounded-[2rem] p-5 md:px-7 md:py-6">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <Link href="/" className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              Synaptic
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link
+                href="/"
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-900/10 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
+                style={{ fontFamily: "var(--font-body)" }}
+              >
+                <ArrowLeft className="h-3 w-3" />
+                Back
+              </Link>
+              <Link href="/" className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                Synaptic
+              </Link>
+            </div>
             <h1 className="mt-2 max-w-5xl text-4xl leading-none text-slate-950 md:text-5xl" style={{ fontFamily: "var(--font-display)" }}>
               {session.seed}
             </h1>

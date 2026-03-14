@@ -1,7 +1,50 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+
+const LOADING_PHRASES = [
+  "Searching ideas",
+  "Mapping connections",
+  "Iterating concepts",
+  "Expanding branches",
+  "Synthesising thoughts",
+  "Building your graph",
+];
+
+function TypewriterLoader() {
+  const [phraseIndex, setPhraseIndex] = useState(0);
+  const [displayed, setDisplayed] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    const phrase = LOADING_PHRASES[phraseIndex];
+    let timeout: ReturnType<typeof setTimeout>;
+
+    if (!deleting && displayed.length < phrase.length) {
+      timeout = setTimeout(() => setDisplayed(phrase.slice(0, displayed.length + 1)), 55);
+    } else if (!deleting && displayed.length === phrase.length) {
+      timeout = setTimeout(() => setDeleting(true), 900);
+    } else if (deleting && displayed.length > 0) {
+      timeout = setTimeout(() => setDisplayed(displayed.slice(0, -1)), 30);
+    } else if (deleting && displayed.length === 0) {
+      setDeleting(false);
+      setPhraseIndex((i) => (i + 1) % LOADING_PHRASES.length);
+    }
+
+    return () => clearTimeout(timeout);
+  }, [displayed, deleting, phraseIndex]);
+
+  return (
+    <div className="flex min-h-[180px] flex-col items-center justify-center gap-3" style={{ fontFamily: "var(--font-body)" }}>
+      <p className="text-lg font-semibold text-slate-800">
+        {displayed}
+        <span className="ml-0.5 inline-block w-0.5 animate-pulse bg-slate-800 align-middle" style={{ height: "1.1em" }} />
+      </p>
+      <p className="text-xs uppercase tracking-[0.22em] text-slate-400">This may take a moment</p>
+    </div>
+  );
+}
 
 export function CreateSessionForm() {
   const router = useRouter();
@@ -38,6 +81,10 @@ export function CreateSessionForm() {
         setError(submissionError instanceof Error ? submissionError.message : "Something went wrong.");
       }
     });
+  }
+
+  if (isPending) {
+    return <TypewriterLoader />;
   }
 
   return (
