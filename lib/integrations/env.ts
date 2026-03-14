@@ -8,6 +8,18 @@ function requireEnv(name: string) {
   return value;
 }
 
+const nextPublicSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const nextPublicSupabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.SUPABASE_URL;
+
+function requireClientEnv(value: string | undefined, name: string) {
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+
+  return value;
+}
+
 export const env = {
   openai: {
     apiKey: () => requireEnv("OPENAI_API_KEY"),
@@ -21,7 +33,9 @@ export const env = {
     ideaIndex: () => process.env.ELASTICSEARCH_IDEA_INDEX || "synaptic-ideas",
   },
   supabase: {
-    url: () => requireEnv("SUPABASE_URL"),
+    url: () => supabaseUrl || requireEnv("SUPABASE_URL"),
+    publicUrl: () => requireClientEnv(nextPublicSupabaseUrl || supabaseUrl, "NEXT_PUBLIC_SUPABASE_URL"),
+    anonKey: () => requireClientEnv(nextPublicSupabaseAnonKey, "NEXT_PUBLIC_SUPABASE_ANON_KEY"),
     serviceRoleKey: () => requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
   },
 };

@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/integrations/supabase";
 
 type SessionRow = {
   id: string;
+  user_id: string | null;
   seed: string;
   domain: string | null;
   graph: unknown;
@@ -79,12 +80,13 @@ function toSession(row: SessionRow): GraphSession {
   });
 }
 
-export async function saveSession(session: GraphSession) {
+export async function saveSession(session: GraphSession, userId: string) {
   const supabase = getSupabaseAdmin();
 
   const { error: sessionError } = await supabase.from("sessions").upsert(
     {
       id: session.id,
+      user_id: userId,
       seed: session.seed,
       domain: session.domain,
       graph: session.graph,
@@ -117,6 +119,7 @@ export async function saveSession(session: GraphSession) {
   const ideaRows = session.graph.nodes.map((node) => ({
     id: node.id,
     session_id: session.id,
+    user_id: userId,
     parent_id: node.parentId,
     label: node.label,
     node_type: node.type,
@@ -147,6 +150,7 @@ export async function saveSession(session: GraphSession) {
   const edgeRows = session.graph.edges.map((edge) => ({
     id: edge.id,
     session_id: session.id,
+    user_id: userId,
     source_id: edge.source,
     target_id: edge.target,
     label: edge.label,
@@ -166,9 +170,9 @@ export async function saveSession(session: GraphSession) {
   await indexSessionInElastic(session);
 }
 
-export async function loadSession(id: string) {
+export async function loadSession(id: string, userId: string) {
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase.from("sessions").select("*").eq("id", id).single();
+  const { data, error } = await supabase.from("sessions").select("*").eq("id", id).eq("user_id", userId).single();
 
   if (error || !data) {
     throw new Error(`Could not load session ${id}: ${error?.message ?? "missing row"}`);
@@ -177,7 +181,7 @@ export async function loadSession(id: string) {
   return toSession(data as SessionRow);
 }
 
-export async function sessionExists(id: string) {
+export async function sessionExists(id: string, userId: string) {
   let supabase;
 
   try {
@@ -189,7 +193,8 @@ export async function sessionExists(id: string) {
   const { count, error } = await supabase
     .from("sessions")
     .select("id", { count: "exact", head: true })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", userId);
 
   if (error) {
     return false;
@@ -198,7 +203,7 @@ export async function sessionExists(id: string) {
   return (count ?? 0) > 0;
 }
 
-export async function listSessions(): Promise<GraphSession[]> {
+export async function listSessions(userId: string): Promise<GraphSession[]> {
   let supabase;
 
   try {
@@ -207,7 +212,11 @@ export async function listSessions(): Promise<GraphSession[]> {
     return [];
   }
 
-  const { data, error } = await supabase.from("sessions").select("*").order("updated_at", { ascending: false });
+  const { data, error } = await supabase
+    .from("sessions")
+    .select("*")
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false });
 
   if (error) {
     throw new Error(`Could not list sessions: ${error.message}`);

@@ -28,8 +28,10 @@ function TypewriterLoader() {
     } else if (deleting && displayed.length > 0) {
       timeout = setTimeout(() => setDisplayed(displayed.slice(0, -1)), 30);
     } else if (deleting && displayed.length === 0) {
-      setDeleting(false);
-      setPhraseIndex((i) => (i + 1) % LOADING_PHRASES.length);
+      timeout = setTimeout(() => {
+        setDeleting(false);
+        setPhraseIndex((i) => (i + 1) % LOADING_PHRASES.length);
+      }, 0);
     }
 
     return () => clearTimeout(timeout);
