@@ -35,6 +35,9 @@ export const env = {
   jina: {
     apiKey: () => requireEnv("JINA_API_KEY"),
   },
+  github: {
+    token: () => process.env.GITHUB_TOKEN,
+  },
   supabase: {
     url: () => supabaseUrl || requireEnv("SUPABASE_URL"),
     publicUrl: () => requireClientEnv(nextPublicSupabaseUrl || supabaseUrl, "NEXT_PUBLIC_SUPABASE_URL"),

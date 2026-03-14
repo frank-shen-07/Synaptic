@@ -7,6 +7,16 @@ import { clamp } from "@/lib/utils";
 
 let exaClient: Exa | null = null;
 
+const EXA_RESULT_COUNT = 8;
+const PATENT_RESULT_COUNT = 8;
+const GITHUB_RESULT_COUNT = 6;
+const MAX_RERANK_CANDIDATES = 18;
+const FINAL_HIT_COUNT = 5;
+
+function logCrosscheck(step: string, detail: Record<string, unknown>) {
+  console.log(`[crosscheck] ${step}`, detail);
+}
+
 function getExaClient() {
   exaClient ??= new Exa(env.exa.apiKey());
   return exaClient;
@@ -51,16 +61,17 @@ function normalizeUrlKey(url: string) {
 }
 
 async function searchExa(query: string): Promise<PriorArtHit[]> {
+  logCrosscheck("exa.request", { query });
   const response = await getExaClient().searchAndContents(query, {
     type: "auto",
-    numResults: 5,
+    numResults: EXA_RESULT_COUNT,
     highlights: {
       query,
       maxCharacters: 320,
     },
   });
 
-  return response.results.map((result) => {
+  const mapped = response.results.map((result) => {
     const title = collapseWhitespace(result.title ?? "") || new URL(result.url).hostname;
     const snippet = buildSnippet(result.highlights, "Related result from Exa search.");
     const score = clamp(result.highlightScores?.[0] ?? result.score ?? similarity(query, `${title} ${snippet}`), 0, 1);
@@ -74,20 +85,34 @@ async function searchExa(query: string): Promise<PriorArtHit[]> {
       matchScore: score,
     };
   });
+
+  logCrosscheck("exa.response", {
+    query,
+    count: mapped.length,
+    items: mapped.map((item) => ({ title: item.title, source: item.source, matchScore: item.matchScore, url: item.url })),
+  });
+
+  return mapped;
 }
 
 async function searchPatents(query: string): Promise<PriorArtHit[]> {
+  logCrosscheck("patent.request", { query });
   const response = await fetch("https://google.serper.dev/patents", {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "X-API-KEY": env.serper.apiKey(),
     },
-    body: JSON.stringify({ q: query }),
+    body: JSON.stringify({ q: query, num: PATENT_RESULT_COUNT }),
     cache: "no-store",
   });
 
   if (!response.ok) {
+    logCrosscheck("patent.response_error", {
+      query,
+      status: response.status,
+      statusText: response.statusText,
+    });
     return [];
   }
 
@@ -112,7 +137,7 @@ async function searchPatents(query: string): Promise<PriorArtHit[]> {
 
   const results = payload.organic ?? payload.patents ?? [];
 
-  return results
+  const mapped = results
     .filter(
       (
         item,
@@ -125,7 +150,7 @@ async function searchPatents(query: string): Promise<PriorArtHit[]> {
         patentNumber?: string;
       } => Boolean(item?.link || item?.url),
     )
-    .slice(0, 5)
+    .slice(0, PATENT_RESULT_COUNT)
     .map((item) => {
       const publicationNumber = item.publicationNumber ?? item.patentNumber;
       const title = collapseWhitespace(item.title ?? "") || "Related patent result";
@@ -143,18 +168,35 @@ async function searchPatents(query: string): Promise<PriorArtHit[]> {
         matchScore: similarity(query, `${title} ${snippet}`),
       };
     });
+
+  logCrosscheck("patent.response", {
+    query,
+    rawCount: results.length,
+    count: mapped.length,
+    items: mapped.map((item) => ({ title: item.title, source: item.source, matchScore: item.matchScore, url: item.url })),
+  });
+
+  return mapped;
 }
 
 async function searchGithub(query: string): Promise<PriorArtHit[]> {
-  const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=3`;
+  const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=${GITHUB_RESULT_COUNT}`;
+  const githubToken = env.github.token();
+  logCrosscheck("github.request", { query, url, authenticated: Boolean(githubToken) });
   const response = await fetch(url, {
     headers: {
       accept: "application/vnd.github+json",
+      ...(githubToken ? { authorization: `Bearer ${githubToken}` } : {}),
     },
     cache: "no-store",
   });
 
   if (!response.ok) {
+    logCrosscheck("github.response_error", {
+      query,
+      status: response.status,
+      statusText: response.statusText,
+    });
     return [];
   }
 
@@ -166,7 +208,7 @@ async function searchGithub(query: string): Promise<PriorArtHit[]> {
     }>;
   };
 
-  return (payload.items ?? []).map((item) => ({
+  const mapped = (payload.items ?? []).map((item) => ({
     id: nanoid(),
     title: item.full_name,
     url: item.html_url,
@@ -174,6 +216,14 @@ async function searchGithub(query: string): Promise<PriorArtHit[]> {
     source: "GitHub",
     matchScore: similarity(query, `${item.full_name} ${item.description ?? ""}`),
   }));
+
+  logCrosscheck("github.response", {
+    query,
+    count: mapped.length,
+    items: mapped.map((item) => ({ title: item.title, source: item.source, matchScore: item.matchScore, url: item.url })),
+  });
+
+  return mapped;
 }
 
 function deduplicateHits(hits: PriorArtHit[]) {
@@ -191,12 +241,25 @@ function deduplicateHits(hits: PriorArtHit[]) {
   });
 }
 
+function selectRerankCandidates(hits: PriorArtHit[]) {
+  return [...hits]
+    .sort((left, right) => right.matchScore - left.matchScore)
+    .slice(0, MAX_RERANK_CANDIDATES);
+}
+
 async function rerankWithJina(query: string, hits: PriorArtHit[]): Promise<PriorArtHit[]> {
   if (hits.length <= 1) {
+    logCrosscheck("jina.skip", { query, reason: "not_enough_hits", hitCount: hits.length });
     return hits;
   }
 
   try {
+    logCrosscheck("jina.request", {
+      query,
+      hitCount: hits.length,
+      documents: hits.map((hit, index) => ({ index, source: hit.source, title: hit.title, url: hit.url })),
+    });
+
     const response = await fetch("https://api.jina.ai/v1/rerank", {
       method: "POST",
       headers: {
@@ -213,6 +276,11 @@ async function rerankWithJina(query: string, hits: PriorArtHit[]): Promise<Prior
     });
 
     if (!response.ok) {
+      logCrosscheck("jina.response_error", {
+        query,
+        status: response.status,
+        statusText: response.statusText,
+      });
       return [...hits].sort((left, right) => right.matchScore - left.matchScore);
     }
 
@@ -235,10 +303,43 @@ async function rerankWithJina(query: string, hits: PriorArtHit[]): Promise<Prior
       target.matchScore = clamp(item.relevance_score, 0, 1);
     }
 
-    return reranked.sort((left, right) => right.matchScore - left.matchScore);
-  } catch {
+    const sorted = reranked.sort((left, right) => right.matchScore - left.matchScore);
+    logCrosscheck("jina.response", {
+      query,
+      count: sorted.length,
+      results: sorted.map((hit) => ({ source: hit.source, title: hit.title, matchScore: hit.matchScore, url: hit.url })),
+    });
+    return sorted;
+  } catch (error) {
+    logCrosscheck("jina.exception", {
+      query,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return [...hits].sort((left, right) => right.matchScore - left.matchScore);
   }
+}
+
+function finalizeHitsWithPatentCoverage(hits: PriorArtHit[], maxHits: number) {
+  const topHits = hits.slice(0, maxHits);
+
+  if (topHits.some((hit) => hit.source === "Patent")) {
+    return topHits;
+  }
+
+  const bestPatent = hits.find((hit) => hit.source === "Patent");
+
+  if (!bestPatent) {
+    return topHits;
+  }
+
+  if (topHits.length === 0) {
+    return [bestPatent];
+  }
+
+  // Keep ranking mostly intact: replace only the last slot with the best patent when absent.
+  const next = [...topHits];
+  next[next.length - 1] = bestPatent;
+  return next;
 }
 
 export async function crosscheckIdea(query: string, _excludeSessionId?: string) {
@@ -254,9 +355,33 @@ export async function crosscheckIdea(query: string, _excludeSessionId?: string) 
     ...(githubHits.status === "fulfilled" ? githubHits.value : []),
   ]);
 
-  const hits = (await rerankWithJina(query, deduplicatedHits)).slice(0, 5);
+  logCrosscheck("providers.summary", {
+    query,
+    exa: exaHits.status === "fulfilled" ? exaHits.value.length : `error: ${String(exaHits.reason)}`,
+    patent: patentHits.status === "fulfilled" ? patentHits.value.length : `error: ${String(patentHits.reason)}`,
+    github: githubHits.status === "fulfilled" ? githubHits.value.length : `error: ${String(githubHits.reason)}`,
+    deduplicated: deduplicatedHits.length,
+  });
+
+  const rerankCandidates = selectRerankCandidates(deduplicatedHits);
+  logCrosscheck("rerank.candidates", {
+    query,
+    candidateCount: rerankCandidates.length,
+    maxCandidates: MAX_RERANK_CANDIDATES,
+    candidates: rerankCandidates.map((hit) => ({ source: hit.source, title: hit.title, matchScore: hit.matchScore, url: hit.url })),
+  });
+
+  const rerankedHits = await rerankWithJina(query, rerankCandidates);
+  const hits = finalizeHitsWithPatentCoverage(rerankedHits, FINAL_HIT_COUNT);
   const topScore = hits[0]?.matchScore ?? 0;
   const originalityScore = clamp(1 - topScore * 0.78, 0.12, 0.95);
+
+  logCrosscheck("crosscheck.final", {
+    query,
+    originalityScore,
+    patentIncluded: hits.some((hit) => hit.source === "Patent"),
+    hits: hits.map((hit) => ({ source: hit.source, title: hit.title, matchScore: hit.matchScore, url: hit.url })),
+  });
 
   return {
     originalityScore,
