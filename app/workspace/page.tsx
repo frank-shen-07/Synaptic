@@ -37,21 +37,6 @@ export default async function WorkspacePage() {
             Synaptic expands one idea into a structured graph with labeled relationships, expandable nodes,
             devil&apos;s-advocate critique, live prior-art crosschecks, tension detection, and one-click export.
           </p>
-
-          <div className="mt-8 grid gap-3 sm:grid-cols-3" style={{ fontFamily: "var(--font-body)" }}>
-            <div className="rounded-[1.6rem] border border-slate-900/10 bg-white/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Pipeline</p>
-              <p className="mt-2 text-sm text-slate-700">Seed input to graph generation to critique to export.</p>
-            </div>
-            <div className="rounded-[1.6rem] border border-slate-900/10 bg-white/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Graph Model</p>
-              <p className="mt-2 text-sm text-slate-700">Flat nodes and typed edges rendered as a zoomable spiral map.</p>
-            </div>
-            <div className="rounded-[1.6rem] border border-slate-900/10 bg-white/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Account Scope</p>
-              <p className="mt-2 text-sm text-slate-700">Your sessions are private to your signed-in Supabase account.</p>
-            </div>
-          </div>
         </div>
 
         <div className="glass-panel rounded-[2rem] p-6 md:p-8">

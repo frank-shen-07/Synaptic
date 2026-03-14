@@ -71,7 +71,7 @@ async function searchExa(query: string): Promise<PriorArtHit[]> {
     },
   });
 
-  const mapped = response.results.map((result) => {
+  const mapped: PriorArtHit[] = response.results.map((result) => {
     const title = collapseWhitespace(result.title ?? "") || new URL(result.url).hostname;
     const snippet = buildSnippet(result.highlights, "Related result from Exa search.");
     const score = clamp(result.highlightScores?.[0] ?? result.score ?? similarity(query, `${title} ${snippet}`), 0, 1);
@@ -137,7 +137,7 @@ async function searchPatents(query: string): Promise<PriorArtHit[]> {
 
   const results = payload.organic ?? payload.patents ?? [];
 
-  const mapped = results
+  const mapped: PriorArtHit[] = results
     .filter(
       (
         item,
@@ -208,7 +208,7 @@ async function searchGithub(query: string): Promise<PriorArtHit[]> {
     }>;
   };
 
-  const mapped = (payload.items ?? []).map((item) => ({
+  const mapped: PriorArtHit[] = (payload.items ?? []).map((item) => ({
     id: nanoid(),
     title: item.full_name,
     url: item.html_url,
