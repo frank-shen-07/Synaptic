@@ -174,7 +174,7 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
           <div>
             <div className="flex items-center gap-3">
               <Link
-                href="/"
+                href="/workspace"
                 className="inline-flex items-center gap-1.5 rounded-full border border-slate-900/10 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900"
                 style={{ fontFamily: "var(--font-body)" }}
               >
