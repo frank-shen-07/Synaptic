@@ -380,9 +380,14 @@ function GraphWorkbenchInner({ initialSession }: GraphWorkbenchProps) {
                           <p className="text-sm font-semibold text-amber-950">{hit.title}</p>
                           <p className="mt-1 text-sm leading-6 text-slate-700">{hit.snippet}</p>
                         </div>
-                        <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                          {(hit.matchScore * 100).toFixed(0)}% match
-                        </span>
+                        <div className="flex flex-col items-end gap-2">
+                          <span className="rounded-full border border-amber-700/15 bg-white/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-900">
+                            {hit.source}
+                          </span>
+                          <span className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                            {(hit.matchScore * 100).toFixed(0)}% match
+                          </span>
+                        </div>
                       </div>
                     </a>
                   ))}

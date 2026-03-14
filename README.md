@@ -1,6 +1,6 @@
 # Synaptic
 
-Synaptic is a full-stack idea exploration app. A user enters one seed idea, gets a graph of AI-generated directions, clicks into any node to inspect a structured dossier, runs cross-checks against indexed ideas and external sources, and exports the session as a one-pager.
+Synaptic is a full-stack idea exploration app. A user enters one seed idea, gets a graph of AI-generated directions, clicks into any node to inspect a structured dossier, runs cross-checks against external sources, and exports the session as a one-pager.
 
 ## Current product behavior
 
@@ -14,7 +14,7 @@ Synaptic is a full-stack idea exploration app. A user enters one seed idea, gets
 - Sign in with email/password or Google
 - Verify email and reset passwords with Supabase Auth
 - Persist sessions, ideas, and edges in Supabase
-- Index sessions and ideas in Elasticsearch
+- Run Exa, patent, and GitHub cross-checks with Jina reranking
 
 ## Stack
 
@@ -24,8 +24,10 @@ Synaptic is a full-stack idea exploration app. A user enters one seed idea, gets
 - Tailwind CSS 4
 - React Flow
 - OpenAI Responses API for structured generation
-- OpenAI embeddings for vector search
-- Elasticsearch for indexing and similarity retrieval
+- Exa for web and paper search
+- Serper patents for patent lookup
+- GitHub search for repository discovery
+- Jina reranker for prior-art ordering
 - Supabase for canonical persistence
 
 ## Architecture
@@ -37,12 +39,12 @@ The runtime split is:
   - node expansion
   - critique / tension analysis
   - one-pager generation
-  - embeddings
 
-- Elasticsearch
-  - index session summaries
-  - index individual idea nodes
-  - semantic similarity search for cross-check
+- External search
+  - Exa web and paper search
+  - Serper patent search
+  - GitHub repository search
+  - Jina reranking for final match ordering
 
 - Supabase
   - Auth for login, Google OAuth, email verification, and recovery
@@ -67,10 +69,9 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 
-ELASTICSEARCH_URL=
-ELASTICSEARCH_API_KEY=
-ELASTICSEARCH_SESSION_INDEX=synaptic-sessions
-ELASTICSEARCH_IDEA_INDEX=synaptic-ideas
+EXA_API_KEY=
+SERPER_API_KEY=
+JINA_API_KEY=
 
 SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_URL=
@@ -81,7 +82,6 @@ SUPABASE_SERVICE_ROLE_KEY=
 Recommended:
 
 - Use `gpt-5-mini` for generation
-- Keep `text-embedding-3-small` for embeddings
 - `NEXT_PUBLIC_SUPABASE_URL` should usually match `SUPABASE_URL`
 - Do not use `SUPABASE_SERVICE_ROLE_KEY` in client-side code
 
@@ -123,8 +123,7 @@ npm run build
 - [components/thought-node.tsx](/Users/frankshen/Documents/GitHub/Synaptic/components/thought-node.tsx): circular node renderer
 - [lib/agent/engine.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/agent/engine.ts): session orchestration
 - [lib/agent/search.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/agent/search.ts): cross-check search pipeline
-- [lib/integrations/openai.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/integrations/openai.ts): OpenAI generation and embeddings
-- [lib/integrations/elasticsearch.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/integrations/elasticsearch.ts): Elastic indexing and retrieval
+- [lib/integrations/openai.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/integrations/openai.ts): OpenAI generation helpers
 - [lib/integrations/supabase.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/integrations/supabase.ts): Supabase admin client
 - [lib/integrations/supabase-browser.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/integrations/supabase-browser.ts): browser auth client
 - [lib/integrations/supabase-server.ts](/Users/frankshen/Documents/GitHub/Synaptic/lib/integrations/supabase-server.ts): server auth client

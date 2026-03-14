@@ -2,7 +2,7 @@
 
 ## Diagram
 
-![Synaptic architecture](./architecture.svg)
+The checked-in `architecture.svg` predates the current cross-check pipeline. Use the Mermaid diagrams below as the source of truth.
 
 ## Source Diagram
 
@@ -11,12 +11,17 @@ flowchart LR
     U[User] --> F[Next.js / React Flow UI]
     F --> A[Next.js Route Handlers]
     A --> O[OpenAI Responses API]
-    A --> E[Elasticsearch]
+    A --> X[Exa]
+    A --> P[Serper patents]
+    A --> G[GitHub REST API]
+    A --> J[Jina reranker]
     A --> S[Supabase]
 
     O -->|structured idea generation| A
-    O -->|embeddings| A
-    E -->|similar idea search / indexed sessions| A
+    X -->|web + paper results| A
+    P -->|patent results| A
+    G -->|repository results| A
+    J -->|reranked matches| A
     S -->|sessions / ideas / edges| A
     A --> F
 ```
@@ -29,16 +34,24 @@ sequenceDiagram
     participant UI as Next.js UI
     participant API as Route Handler
     participant OpenAI as OpenAI API
-    participant Elastic as Elasticsearch
+    participant Exa as Exa
+    participant Serper as Serper patents
+    participant GitHub as GitHub REST API
+    participant Jina as Jina reranker
     participant Supabase as Supabase
 
     User->>UI: Enter seed or expand/cross-check node
     UI->>API: POST action
     API->>OpenAI: Generate structured ideas or analysis
     API->>Supabase: Persist session snapshot + idea rows + edge rows
-    API->>OpenAI: Create embeddings
-    API->>Elastic: Index session and idea documents
-    Elastic-->>API: Similar indexed ideas for retrieval/cross-check
+    API->>Exa: Search web + paper sources
+    API->>Serper: Search patents
+    API->>GitHub: Search repositories
+    Exa-->>API: Candidate prior-art hits
+    Serper-->>API: Candidate patent hits
+    GitHub-->>API: Candidate repo hits
+    API->>Jina: Rerank deduplicated hits
+    Jina-->>API: Final ordered prior-art hits
     API-->>UI: Updated graph session JSON
 ```
 
@@ -46,8 +59,7 @@ sequenceDiagram
 
 - Frontend: Next.js 16, React 19, React Flow, Tailwind CSS
 - AI generation: OpenAI Responses API with structured JSON outputs
-- Embeddings: OpenAI embeddings API
-- Search/indexing: Elasticsearch dense vector + semantic search
+- Search: Exa, Serper patents, GitHub REST API, Jina reranker
 - Persistence: Supabase tables for sessions, ideas, and idea edges
 
 ## Data model
@@ -72,12 +84,12 @@ sequenceDiagram
   - generate child branches on expansion
   - generate critiques / tensions
   - generate one-pager
-  - generate embeddings for semantic indexing
 
-- Elasticsearch
-  - index sessions for retrieval
-  - index individual ideas for similarity search
-  - return nearest prior internal ideas during cross-check
+- External search
+  - search web and paper sources via Exa
+  - search patents via Serper
+  - search repositories via GitHub
+  - rerank combined results via Jina
 
 - Supabase
   - primary source of truth for sessions

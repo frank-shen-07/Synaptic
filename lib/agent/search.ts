@@ -1,17 +1,19 @@
 import { nanoid } from "nanoid";
+import Exa from "exa-js";
 
-import { searchElasticSimilarIdeas } from "@/lib/integrations/elasticsearch";
-import { clamp } from "@/lib/utils";
+import { env } from "@/lib/integrations/env";
 import type { PriorArtHit } from "@/lib/graph/schema";
+import { clamp } from "@/lib/utils";
 
-function stripHtml(input: string) {
-  return input
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, " ")
-    .trim();
+let exaClient: Exa | null = null;
+
+function getExaClient() {
+  exaClient ??= new Exa(env.exa.apiKey());
+  return exaClient;
+}
+
+function collapseWhitespace(input: string) {
+  return input.replace(/\s+/g, " ").trim();
 }
 
 function similarity(query: string, text: string) {
@@ -32,13 +34,56 @@ function similarity(query: string, text: string) {
   return clamp(overlap / Math.max(queryTerms.size, 1), 0, 1);
 }
 
-async function searchDuckDuckGo(query: string): Promise<PriorArtHit[]> {
-  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-  const response = await fetch(url, {
-    headers: {
-      "user-agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Synaptic/1.0 Safari/537.36",
+function buildSnippet(parts: Array<string | null | undefined>, fallback: string) {
+  const snippet = collapseWhitespace(parts.filter(Boolean).join(" "));
+  return snippet || fallback;
+}
+
+function normalizeUrlKey(url: string) {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+    return parsed.toString();
+  } catch {
+    return url.trim();
+  }
+}
+
+async function searchExa(query: string): Promise<PriorArtHit[]> {
+  const response = await getExaClient().searchAndContents(query, {
+    type: "auto",
+    numResults: 5,
+    highlights: {
+      query,
+      maxCharacters: 320,
     },
+  });
+
+  return response.results.map((result) => {
+    const title = collapseWhitespace(result.title ?? "") || new URL(result.url).hostname;
+    const snippet = buildSnippet(result.highlights, "Related result from Exa search.");
+    const score = clamp(result.highlightScores?.[0] ?? result.score ?? similarity(query, `${title} ${snippet}`), 0, 1);
+
+    return {
+      id: result.id || nanoid(),
+      title,
+      url: result.url,
+      snippet,
+      source: "Exa",
+      matchScore: score,
+    };
+  });
+}
+
+async function searchPatents(query: string): Promise<PriorArtHit[]> {
+  const response = await fetch("https://google.serper.dev/patents", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "X-API-KEY": env.serper.apiKey(),
+    },
+    body: JSON.stringify({ q: query }),
     cache: "no-store",
   });
 
@@ -46,27 +91,58 @@ async function searchDuckDuckGo(query: string): Promise<PriorArtHit[]> {
     return [];
   }
 
-  const html = await response.text();
-  const matches = [...html.matchAll(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/g)];
+  const payload = (await response.json()) as {
+    organic?: Array<{
+      title?: string;
+      link?: string;
+      url?: string;
+      snippet?: string;
+      publicationNumber?: string;
+      patentNumber?: string;
+    }>;
+    patents?: Array<{
+      title?: string;
+      link?: string;
+      url?: string;
+      snippet?: string;
+      publicationNumber?: string;
+      patentNumber?: string;
+    }>;
+  };
 
-  return matches.slice(0, 5).map((match) => {
-    const [, urlMatch, titleMatch, snippetMatch] = match;
-    const title = stripHtml(titleMatch);
-    const snippet = stripHtml(snippetMatch);
-    const score = similarity(query, `${title} ${snippet}`);
-    const resolvedUrl = urlMatch.startsWith("//duckduckgo.com/l/?")
-      ? new URL(`https:${urlMatch}`).searchParams.get("uddg") ?? `https:${urlMatch}`
-      : urlMatch;
+  const results = payload.organic ?? payload.patents ?? [];
 
-    return {
-      id: nanoid(),
-      title,
-      url: decodeURIComponent(resolvedUrl),
-      snippet,
-      source: "DuckDuckGo",
-      matchScore: score,
-    };
-  });
+  return results
+    .filter(
+      (
+        item,
+      ): item is {
+        title?: string;
+        link?: string;
+        url?: string;
+        snippet?: string;
+        publicationNumber?: string;
+        patentNumber?: string;
+      } => Boolean(item?.link || item?.url),
+    )
+    .slice(0, 5)
+    .map((item) => {
+      const publicationNumber = item.publicationNumber ?? item.patentNumber;
+      const title = collapseWhitespace(item.title ?? "") || "Related patent result";
+      const snippet = buildSnippet(
+        [item.snippet, publicationNumber ? `Publication ${publicationNumber}` : null],
+        "Patent result with related positioning.",
+      );
+
+      return {
+        id: publicationNumber ?? nanoid(),
+        title,
+        url: item.link ?? item.url ?? "#",
+        snippet,
+        source: "Patent",
+        matchScore: similarity(query, `${title} ${snippet}`),
+      };
+    });
 }
 
 async function searchGithub(query: string): Promise<PriorArtHit[]> {
@@ -100,26 +176,90 @@ async function searchGithub(query: string): Promise<PriorArtHit[]> {
   }));
 }
 
-export async function crosscheckIdea(query: string, excludeSessionId?: string) {
-  const [elasticHits, webHits, githubHits] = await Promise.allSettled([
-    searchElasticSimilarIdeas(query, excludeSessionId),
-    searchDuckDuckGo(query),
+function deduplicateHits(hits: PriorArtHit[]) {
+  const seen = new Set<string>();
+
+  return hits.filter((hit) => {
+    const urlKey = normalizeUrlKey(hit.url);
+
+    if (seen.has(urlKey)) {
+      return false;
+    }
+
+    seen.add(urlKey);
+    return true;
+  });
+}
+
+async function rerankWithJina(query: string, hits: PriorArtHit[]): Promise<PriorArtHit[]> {
+  if (hits.length <= 1) {
+    return hits;
+  }
+
+  try {
+    const response = await fetch("https://api.jina.ai/v1/rerank", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${env.jina.apiKey()}`,
+      },
+      body: JSON.stringify({
+        model: "jina-reranker-v3",
+        query,
+        top_n: hits.length,
+        documents: hits.map((hit) => `${hit.title}\n${hit.snippet}`),
+      }),
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return [...hits].sort((left, right) => right.matchScore - left.matchScore);
+    }
+
+    const payload = (await response.json()) as {
+      results?: Array<{
+        index: number;
+        relevance_score: number;
+      }>;
+    };
+
+    const reranked = hits.map((hit) => ({ ...hit }));
+
+    for (const item of payload.results ?? []) {
+      const target = reranked[item.index];
+
+      if (!target) {
+        continue;
+      }
+
+      target.matchScore = clamp(item.relevance_score, 0, 1);
+    }
+
+    return reranked.sort((left, right) => right.matchScore - left.matchScore);
+  } catch {
+    return [...hits].sort((left, right) => right.matchScore - left.matchScore);
+  }
+}
+
+export async function crosscheckIdea(query: string, _excludeSessionId?: string) {
+  const [exaHits, patentHits, githubHits] = await Promise.allSettled([
+    searchExa(query),
+    searchPatents(query),
     searchGithub(query),
   ]);
 
-  const combined = [
-    ...(elasticHits.status === "fulfilled" ? elasticHits.value : []),
-    ...(webHits.status === "fulfilled" ? webHits.value : []),
+  const deduplicatedHits = deduplicateHits([
+    ...(exaHits.status === "fulfilled" ? exaHits.value : []),
+    ...(patentHits.status === "fulfilled" ? patentHits.value : []),
     ...(githubHits.status === "fulfilled" ? githubHits.value : []),
-  ]
-    .sort((left, right) => right.matchScore - left.matchScore)
-    .slice(0, 6);
+  ]);
 
-  const topScore = combined[0]?.matchScore ?? 0;
+  const hits = (await rerankWithJina(query, deduplicatedHits)).slice(0, 5);
+  const topScore = hits[0]?.matchScore ?? 0;
   const originalityScore = clamp(1 - topScore * 0.78, 0.12, 0.95);
 
   return {
     originalityScore,
-    hits: combined,
+    hits,
   };
 }

@@ -26,11 +26,14 @@ export const env = {
     model: () => process.env.OPENAI_MODEL || "gpt-5-mini",
     embeddingModel: () => process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small",
   },
-  elastic: {
-    url: () => requireEnv("ELASTICSEARCH_URL"),
-    apiKey: () => requireEnv("ELASTICSEARCH_API_KEY"),
-    sessionIndex: () => process.env.ELASTICSEARCH_SESSION_INDEX || "synaptic-sessions",
-    ideaIndex: () => process.env.ELASTICSEARCH_IDEA_INDEX || "synaptic-ideas",
+  exa: {
+    apiKey: () => requireEnv("EXA_API_KEY"),
+  },
+  serper: {
+    apiKey: () => requireEnv("SERPER_API_KEY"),
+  },
+  jina: {
+    apiKey: () => requireEnv("JINA_API_KEY"),
   },
   supabase: {
     url: () => supabaseUrl || requireEnv("SUPABASE_URL"),

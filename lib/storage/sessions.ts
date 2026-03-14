@@ -1,5 +1,4 @@
 import { graphSessionSchema, type GraphSession } from "@/lib/graph/schema";
-import { indexSessionInElastic } from "@/lib/integrations/elasticsearch";
 import { getSupabaseAdmin } from "@/lib/integrations/supabase";
 
 type SessionRow = {
@@ -166,8 +165,6 @@ export async function saveSession(session: GraphSession, userId: string) {
       throw new Error(`Could not save edges: ${edgesInsertError.message}`);
     }
   }
-
-  await indexSessionInElastic(session);
 }
 
 export async function loadSession(id: string, userId: string) {

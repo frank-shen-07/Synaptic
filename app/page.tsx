@@ -48,7 +48,7 @@ const steps = [
     number: "04",
     icon: "check",
     title: "Pressure-Test",
-    body: "Run web and GitHub cross-checks on demand. The results feed back into critique and prior-art retrieval.",
+    body: "Run Exa, patent, and GitHub cross-checks on demand. The reranked results feed back into critique and prior-art retrieval.",
   },
   {
     number: "05",
@@ -90,7 +90,7 @@ const features = [
   {
     icon: Search,
     title: "Live Crosschecks",
-    body: "Run on-demand web and GitHub search, then blend those results with Elasticsearch semantic retrieval.",
+    body: "Run on-demand Exa, patent, and GitHub search, then rerank the combined results before surfacing the strongest matches.",
   },
   {
     icon: FileText,
@@ -110,17 +110,17 @@ const stackGroups = [
     items: [
       ["OpenAI Responses API", "Idea generation"],
       ["Structured outputs", "Node validation"],
-      ["text-embedding-3-small", "Vector embeddings"],
       ["Critique pipeline", "Tension analysis"],
+      ["Cross-check orchestration", "Result blending"],
     ],
   },
   {
-    title: "Search & Index",
+    title: "Search & Validation",
     items: [
-      ["Elasticsearch", "Semantic retrieval"],
-      ["Session index", "Full-text search"],
-      ["Idea index", "Node similarity"],
-      ["Cross-check pipeline", "Web + GitHub"],
+      ["Exa", "Web + paper search"],
+      ["Serper patents", "Patent lookup"],
+      ["GitHub REST API", "Repository discovery"],
+      ["Jina reranker", "Relevance ordering"],
     ],
   },
   {

@@ -20,11 +20,11 @@
   },
   "homepage": "https://github.com/frank-shen-07/Synaptic#readme",
   "dependencies": {
-    "@elastic/elasticsearch": "^9.3.4",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.99.1",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
+    "exa-js": "^2.8.0",
     "jspdf": "^4.2.0",
     "lucide-react": "^0.577.0",
     "nanoid": "^3.3.11",
