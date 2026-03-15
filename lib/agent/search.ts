@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import Exa from "exa-js";
 
 import { env } from "@/lib/integrations/env";
+import { generatePriorArtSearchPlan } from "@/lib/integrations/openai";
 import type { PriorArtHit } from "@/lib/graph/schema";
 import { clamp } from "@/lib/utils";
 
@@ -13,6 +14,20 @@ const GITHUB_RESULT_COUNT = 6;
 const ELASTICSEARCH_RESULT_COUNT = 8;
 const MAX_RERANK_CANDIDATES = 18;
 const FINAL_HIT_COUNT = 5;
+const MIN_PER_RETRIEVAL_PASS = 2;
+
+type RetrievalPass =
+  | "exa_primary"
+  | "exa_category"
+  | "exa_incumbent"
+  | "patent"
+  | "github"
+  | "elasticsearch";
+
+type SearchHit = PriorArtHit & {
+  retrievalPass: RetrievalPass;
+  queryUsed: string;
+};
 
 type ElasticsearchConfig =
   | {
@@ -25,6 +40,24 @@ type ElasticsearchConfig =
       enabled: false;
       reason: string;
     };
+
+const retrievalPassOrder: RetrievalPass[] = [
+  "exa_primary",
+  "exa_incumbent",
+  "exa_category",
+  "patent",
+  "github",
+  "elasticsearch",
+];
+
+const retrievalPassLimits: Record<RetrievalPass, number> = {
+  exa_primary: 6,
+  exa_category: 4,
+  exa_incumbent: 4,
+  patent: 3,
+  github: 3,
+  elasticsearch: 3,
+};
 
 function logCrosscheck(step: string, detail: Record<string, unknown>) {
   console.log(`[crosscheck] ${step}`, detail);
@@ -161,8 +194,8 @@ function normalizeUrlKey(url: string) {
   }
 }
 
-async function searchExa(query: string): Promise<PriorArtHit[]> {
-  logCrosscheck("exa.request", { query });
+async function searchExa(query: string, retrievalPass: RetrievalPass = "exa_primary"): Promise<SearchHit[]> {
+  logCrosscheck("exa.request", { query, retrievalPass });
   const response = await getExaClient().searchAndContents(query, {
     type: "auto",
     numResults: EXA_RESULT_COUNT,
@@ -172,7 +205,7 @@ async function searchExa(query: string): Promise<PriorArtHit[]> {
     },
   });
 
-  const mapped: PriorArtHit[] = response.results.map((result) => {
+  const mapped: SearchHit[] = response.results.map((result) => {
     const title = collapseWhitespace(result.title ?? "") || new URL(result.url).hostname;
     const snippet = buildSnippet(result.highlights, "Related result from Exa search.");
     const score = clamp(result.highlightScores?.[0] ?? result.score ?? similarity(query, `${title} ${snippet}`), 0, 1);
@@ -184,11 +217,14 @@ async function searchExa(query: string): Promise<PriorArtHit[]> {
       snippet,
       source: "Exa",
       matchScore: score,
+      retrievalPass,
+      queryUsed: query,
     };
   });
 
   logCrosscheck("exa.response", {
     query,
+    retrievalPass,
     count: mapped.length,
     items: mapped.map((item) => ({ title: item.title, source: item.source, matchScore: item.matchScore, url: item.url })),
   });
@@ -196,7 +232,7 @@ async function searchExa(query: string): Promise<PriorArtHit[]> {
   return mapped;
 }
 
-async function searchPatents(query: string): Promise<PriorArtHit[]> {
+async function searchPatents(query: string): Promise<SearchHit[]> {
   logCrosscheck("patent.request", { query });
   const response = await fetch("https://google.serper.dev/patents", {
     method: "POST",
@@ -238,7 +274,7 @@ async function searchPatents(query: string): Promise<PriorArtHit[]> {
 
   const results = payload.organic ?? payload.patents ?? [];
 
-  const mapped: PriorArtHit[] = results
+  const mapped: SearchHit[] = results
     .filter(
       (
         item,
@@ -267,6 +303,8 @@ async function searchPatents(query: string): Promise<PriorArtHit[]> {
         snippet,
         source: "Patent",
         matchScore: similarity(query, `${title} ${snippet}`),
+        retrievalPass: "patent",
+        queryUsed: query,
       };
     });
 
@@ -280,7 +318,7 @@ async function searchPatents(query: string): Promise<PriorArtHit[]> {
   return mapped;
 }
 
-async function searchGithub(query: string): Promise<PriorArtHit[]> {
+async function searchGithub(query: string): Promise<SearchHit[]> {
   const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=${GITHUB_RESULT_COUNT}`;
   const githubToken = env.github.token();
   logCrosscheck("github.request", { query, url, authenticated: Boolean(githubToken) });
@@ -309,13 +347,15 @@ async function searchGithub(query: string): Promise<PriorArtHit[]> {
     }>;
   };
 
-  const mapped: PriorArtHit[] = (payload.items ?? []).map((item) => ({
+  const mapped: SearchHit[] = (payload.items ?? []).map((item) => ({
     id: nanoid(),
     title: item.full_name,
     url: item.html_url,
     snippet: item.description ?? "GitHub repository with related positioning.",
     source: "GitHub",
     matchScore: similarity(query, `${item.full_name} ${item.description ?? ""}`),
+    retrievalPass: "github",
+    queryUsed: query,
   }));
 
   logCrosscheck("github.response", {
@@ -327,7 +367,7 @@ async function searchGithub(query: string): Promise<PriorArtHit[]> {
   return mapped;
 }
 
-async function searchElasticsearch(query: string): Promise<PriorArtHit[]> {
+async function searchElasticsearch(query: string): Promise<SearchHit[]> {
   const config = getElasticsearchConfig();
 
   if (!config.enabled) {
@@ -414,7 +454,7 @@ async function searchElasticsearch(query: string): Promise<PriorArtHit[]> {
     };
   };
 
-  const mapped: PriorArtHit[] = (payload.hits?.hits ?? []).flatMap((hit) => {
+  const mapped: SearchHit[] = (payload.hits?.hits ?? []).flatMap((hit) => {
     const source = hit._source ?? {};
     const title =
       pickFirstString(source.title, source.name, source.headline) || "Related Elasticsearch result";
@@ -444,6 +484,8 @@ async function searchElasticsearch(query: string): Promise<PriorArtHit[]> {
         snippet,
         source: "Elasticsearch",
         matchScore: normalizeSearchScore(hit._score, fallbackScore),
+        retrievalPass: "elasticsearch",
+        queryUsed: query,
       },
     ];
   });
@@ -457,7 +499,7 @@ async function searchElasticsearch(query: string): Promise<PriorArtHit[]> {
   return mapped;
 }
 
-function deduplicateHits(hits: PriorArtHit[]) {
+function deduplicateHits(hits: SearchHit[]) {
   const seen = new Set<string>();
 
   return hits.filter((hit) => {
@@ -472,13 +514,82 @@ function deduplicateHits(hits: PriorArtHit[]) {
   });
 }
 
-function selectRerankCandidates(hits: PriorArtHit[]) {
-  return [...hits]
-    .sort((left, right) => right.matchScore - left.matchScore)
-    .slice(0, MAX_RERANK_CANDIDATES);
+function getCandidateScore(hit: SearchHit) {
+  if (hit.retrievalPass === "exa_incumbent") {
+    return hit.matchScore + 0.08;
+  }
+
+  if (hit.retrievalPass === "exa_category") {
+    return hit.matchScore + 0.04;
+  }
+
+  return hit.matchScore;
 }
 
-async function rerankWithJina(query: string, hits: PriorArtHit[]): Promise<PriorArtHit[]> {
+function selectRerankCandidates(hits: SearchHit[]) {
+  const byPass = new Map<RetrievalPass, SearchHit[]>();
+
+  for (const hit of hits) {
+    const passHits = byPass.get(hit.retrievalPass) ?? [];
+    passHits.push(hit);
+    byPass.set(hit.retrievalPass, passHits);
+  }
+
+  for (const [pass, passHits] of byPass.entries()) {
+    byPass.set(
+      pass,
+      [...passHits].sort((left, right) => getCandidateScore(right) - getCandidateScore(left)),
+    );
+  }
+
+  const selected: SearchHit[] = [];
+  const selectedUrls = new Set<string>();
+  const passCounts = new Map<RetrievalPass, number>();
+
+  for (const pass of retrievalPassOrder) {
+    const passHits = byPass.get(pass) ?? [];
+
+    for (const hit of passHits) {
+      if (selected.length >= MAX_RERANK_CANDIDATES) {
+        break;
+      }
+
+      const urlKey = normalizeUrlKey(hit.url);
+      const currentCount = passCounts.get(pass) ?? 0;
+
+      if (selectedUrls.has(urlKey) || currentCount >= MIN_PER_RETRIEVAL_PASS) {
+        continue;
+      }
+
+      selected.push(hit);
+      selectedUrls.add(urlKey);
+      passCounts.set(pass, currentCount + 1);
+    }
+  }
+
+  const remaining = [...hits].sort((left, right) => getCandidateScore(right) - getCandidateScore(left));
+
+  for (const hit of remaining) {
+    if (selected.length >= MAX_RERANK_CANDIDATES) {
+      break;
+    }
+
+    const urlKey = normalizeUrlKey(hit.url);
+    const currentCount = passCounts.get(hit.retrievalPass) ?? 0;
+
+    if (selectedUrls.has(urlKey) || currentCount >= retrievalPassLimits[hit.retrievalPass]) {
+      continue;
+    }
+
+    selected.push(hit);
+    selectedUrls.add(urlKey);
+    passCounts.set(hit.retrievalPass, currentCount + 1);
+  }
+
+  return selected;
+}
+
+async function rerankWithJina(query: string, hits: SearchHit[]): Promise<SearchHit[]> {
   if (hits.length <= 1) {
     logCrosscheck("jina.skip", { query, reason: "not_enough_hits", hitCount: hits.length });
     return hits;
@@ -550,39 +661,88 @@ async function rerankWithJina(query: string, hits: PriorArtHit[]): Promise<Prior
   }
 }
 
-function finalizeHitsWithPatentCoverage(hits: PriorArtHit[], maxHits: number) {
-  const topHits = hits.slice(0, maxHits);
-
-  if (topHits.some((hit) => hit.source === "Patent")) {
+function replaceLastNonProtectedHit(
+  topHits: SearchHit[],
+  replacement: SearchHit,
+  isProtected: (hit: SearchHit) => boolean,
+) {
+  if (topHits.some((hit) => normalizeUrlKey(hit.url) === normalizeUrlKey(replacement.url))) {
     return topHits;
   }
 
-  const bestPatent = hits.find((hit) => hit.source === "Patent");
+  const reversedIndex = [...topHits].reverse().findIndex((hit) => !isProtected(hit));
 
-  if (!bestPatent) {
+  if (reversedIndex === -1) {
     return topHits;
   }
 
-  if (topHits.length === 0) {
-    return [bestPatent];
-  }
-
-  // Keep ranking mostly intact: replace only the last slot with the best patent when absent.
   const next = [...topHits];
-  next[next.length - 1] = bestPatent;
+  next[topHits.length - 1 - reversedIndex] = replacement;
   return next;
 }
 
+function finalizeHitsWithCoverage(hits: SearchHit[], maxHits: number) {
+  const topHits = hits.slice(0, maxHits);
+
+  if (!topHits.some((hit) => hit.source === "Patent")) {
+    const bestPatent = hits.find((hit) => hit.source === "Patent");
+
+    if (bestPatent) {
+      const withPatent = replaceLastNonProtectedHit(topHits, bestPatent, () => false);
+      topHits.splice(0, topHits.length, ...withPatent);
+    }
+  }
+
+  const hasBroadAnalog = topHits.some(
+    (hit) => hit.retrievalPass === "exa_incumbent" || hit.retrievalPass === "exa_category",
+  );
+
+  if (!hasBroadAnalog) {
+    const bestBroadAnalog = hits.find(
+      (hit) => hit.retrievalPass === "exa_incumbent" || hit.retrievalPass === "exa_category",
+    );
+
+    if (bestBroadAnalog) {
+      const withBroadAnalog = replaceLastNonProtectedHit(topHits, bestBroadAnalog, (hit) => hit.source === "Patent");
+      topHits.splice(0, topHits.length, ...withBroadAnalog);
+    }
+  }
+
+  return topHits;
+}
+
 export async function crosscheckIdea(query: string, _excludeSessionId?: string) {
-  const [exaHits, patentHits, githubHits, elasticsearchHits] = await Promise.allSettled([
-    searchExa(query),
-    searchPatents(query),
-    searchGithub(query),
-    searchElasticsearch(query),
-  ]);
+  const searchPlan = await generatePriorArtSearchPlan(query);
+  const categoryQuery =
+    searchPlan.categoryQuery === searchPlan.directQuery ? null : searchPlan.categoryQuery;
+  const incumbentQuery =
+    searchPlan.incumbentQuery === searchPlan.directQuery || searchPlan.incumbentQuery === categoryQuery
+      ? null
+      : searchPlan.incumbentQuery;
+  logCrosscheck("query.plan", {
+    query,
+    searchPlan,
+    deduplicatedPlan: {
+      directQuery: searchPlan.directQuery,
+      categoryQuery,
+      incumbentQuery,
+    },
+  });
+
+  const [exaPrimaryHits, exaCategoryHits, exaIncumbentHits, patentHits, githubHits, elasticsearchHits] =
+    await Promise.allSettled([
+      searchExa(searchPlan.directQuery, "exa_primary"),
+      categoryQuery ? searchExa(categoryQuery, "exa_category") : Promise.resolve([]),
+      incumbentQuery ? searchExa(incumbentQuery, "exa_incumbent") : Promise.resolve([]),
+      searchPatents(query),
+      searchGithub(query),
+      searchElasticsearch(query),
+    ]);
 
   const deduplicatedHits = deduplicateHits([
-    ...(exaHits.status === "fulfilled" ? exaHits.value : []),
+    ...(exaPrimaryHits.status === "fulfilled" ? exaPrimaryHits.value : []),
+    ...(exaCategoryHits.status === "fulfilled" ? exaCategoryHits.value : []),
+    ...(exaIncumbentHits.status === "fulfilled" ? exaIncumbentHits.value : []),
     ...(patentHits.status === "fulfilled" ? patentHits.value : []),
     ...(githubHits.status === "fulfilled" ? githubHits.value : []),
     ...(elasticsearchHits.status === "fulfilled" ? elasticsearchHits.value : []),
@@ -590,7 +750,14 @@ export async function crosscheckIdea(query: string, _excludeSessionId?: string) 
 
   logCrosscheck("providers.summary", {
     query,
-    exa: exaHits.status === "fulfilled" ? exaHits.value.length : `error: ${String(exaHits.reason)}`,
+    exaPrimary:
+      exaPrimaryHits.status === "fulfilled" ? exaPrimaryHits.value.length : `error: ${String(exaPrimaryHits.reason)}`,
+    exaCategory:
+      exaCategoryHits.status === "fulfilled" ? exaCategoryHits.value.length : `error: ${String(exaCategoryHits.reason)}`,
+    exaIncumbent:
+      exaIncumbentHits.status === "fulfilled"
+        ? exaIncumbentHits.value.length
+        : `error: ${String(exaIncumbentHits.reason)}`,
     patent: patentHits.status === "fulfilled" ? patentHits.value.length : `error: ${String(patentHits.reason)}`,
     github: githubHits.status === "fulfilled" ? githubHits.value.length : `error: ${String(githubHits.reason)}`,
     elasticsearch:
@@ -603,11 +770,17 @@ export async function crosscheckIdea(query: string, _excludeSessionId?: string) 
     query,
     candidateCount: rerankCandidates.length,
     maxCandidates: MAX_RERANK_CANDIDATES,
-    candidates: rerankCandidates.map((hit) => ({ source: hit.source, title: hit.title, matchScore: hit.matchScore, url: hit.url })),
+    candidates: rerankCandidates.map((hit) => ({
+      source: hit.source,
+      retrievalPass: hit.retrievalPass,
+      title: hit.title,
+      matchScore: hit.matchScore,
+      url: hit.url,
+    })),
   });
 
   const rerankedHits = await rerankWithJina(query, rerankCandidates);
-  const hits = finalizeHitsWithPatentCoverage(rerankedHits, FINAL_HIT_COUNT);
+  const hits = finalizeHitsWithCoverage(rerankedHits, FINAL_HIT_COUNT);
   const topScore = hits[0]?.matchScore ?? 0;
   const originalityScore = clamp(1 - topScore * 0.78, 0.12, 0.95);
 
@@ -615,11 +788,20 @@ export async function crosscheckIdea(query: string, _excludeSessionId?: string) 
     query,
     originalityScore,
     patentIncluded: hits.some((hit) => hit.source === "Patent"),
-    hits: hits.map((hit) => ({ source: hit.source, title: hit.title, matchScore: hit.matchScore, url: hit.url })),
+    broadAnalogIncluded: hits.some(
+      (hit) => hit.retrievalPass === "exa_incumbent" || hit.retrievalPass === "exa_category",
+    ),
+    hits: hits.map((hit) => ({
+      source: hit.source,
+      retrievalPass: hit.retrievalPass,
+      title: hit.title,
+      matchScore: hit.matchScore,
+      url: hit.url,
+    })),
   });
 
   return {
     originalityScore,
-    hits,
+    hits: hits.map(({ retrievalPass: _retrievalPass, queryUsed: _queryUsed, ...hit }) => hit),
   };
 }

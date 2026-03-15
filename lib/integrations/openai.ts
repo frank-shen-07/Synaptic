@@ -69,6 +69,18 @@ const ideaNodeHydrationWireSchema = z.object({
   crosscheckQuery: z.string().min(12),
 });
 
+const priorArtSearchPlanSchema = z.object({
+  directQuery: z.string().min(12).max(180),
+  categoryQuery: z.string().min(12).max(180),
+  incumbentQuery: z.string().min(12).max(180),
+});
+
+const priorArtSearchPlanWireSchema = z.object({
+  directQuery: z.string().min(6),
+  categoryQuery: z.string().min(6),
+  incumbentQuery: z.string().min(6),
+});
+
 const analysisSchema = z.object({
   challenges: z.array(z.string()).min(2).max(4),
   tensions: z
@@ -190,6 +202,32 @@ const allowedAcronyms = new Set([
   "UX",
 ]);
 
+const searchQueryStopwords = new Set([
+  "a",
+  "an",
+  "and",
+  "for",
+  "from",
+  "handled",
+  "in",
+  "into",
+  "need",
+  "of",
+  "on",
+  "one",
+  "or",
+  "residents",
+  "that",
+  "the",
+  "their",
+  "this",
+  "through",
+  "to",
+  "using",
+  "who",
+  "with",
+]);
+
 type IdeaTeaser = z.infer<typeof ideaTeaserResponseSchema>["ideas"][number];
 
 type IdeaTeaserReview = {
@@ -290,6 +328,30 @@ function countPhraseHits(value: string, phrases: string[]) {
 function countUncommonAcronyms(value: string) {
   const acronyms = cleanPhrase(value).match(/\b[A-Z]{2,}\b/g) ?? [];
   return acronyms.filter((token) => !allowedAcronyms.has(token)).length;
+}
+
+function normalizeSearchQuery(value: string, maxWords = 14) {
+  const tokens = cleanPhrase(value)
+    .replace(/[.,:;!?()]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  const preferredWords = new Set(["alternatives", "apps", "companies", "competitors", "leaders", "market", "services"]);
+  const condensed = tokens.filter((token, index) => {
+    const normalized = token.toLowerCase();
+
+    if (preferredWords.has(normalized)) {
+      return true;
+    }
+
+    if (index === 0) {
+      return true;
+    }
+
+    return !searchQueryStopwords.has(normalized);
+  });
+
+  const shortened = condensed.slice(0, maxWords).join(" ");
+  return fitWithinLimit(shortened || cleanPhrase(value), 180);
 }
 
 function fitWithinLimit(value: string, maxLength: number, sentence = false) {
@@ -433,6 +495,24 @@ function normalizeNodeHydrationPayload(payload: z.infer<typeof ideaNodeHydration
   };
 }
 
+function normalizePriorArtSearchPlanPayload(payload: z.infer<typeof priorArtSearchPlanWireSchema>) {
+  return {
+    directQuery: normalizeSearchQuery(payload.directQuery),
+    categoryQuery: normalizeSearchQuery(payload.categoryQuery),
+    incumbentQuery: normalizeSearchQuery(payload.incumbentQuery),
+  };
+}
+
+function buildPriorArtSearchPlanFallback(query: string) {
+  const normalized = normalizeSearchQuery(query);
+
+  return {
+    directQuery: normalized,
+    categoryQuery: normalizeSearchQuery(`${normalized} market category alternatives competitors`, 16),
+    incumbentQuery: normalizeSearchQuery(`leading companies apps services similar to ${normalized}`, 16),
+  };
+}
+
 function buildNodeDetailsPrompt({
   seed,
   node,
@@ -478,6 +558,12 @@ function parseNodeHydrationWirePayload(payload: unknown) {
 
 export function parseNodeDetailsPayload(payload: unknown) {
   return ideaNodeHydrationSchema.parse(normalizeNodeHydrationPayload(parseNodeHydrationWirePayload(payload)));
+}
+
+export function parsePriorArtSearchPlanPayload(payload: unknown) {
+  return priorArtSearchPlanSchema.parse(
+    normalizePriorArtSearchPlanPayload(priorArtSearchPlanWireSchema.parse(payload)),
+  );
 }
 
 function hasDetails(details: NodeDetails) {
@@ -573,6 +659,36 @@ async function generateStructured<T>({
   }
 
   throw lastError ?? new Error(`OpenAI returned no parsed output for ${name} and no recoverable text payload.`);
+}
+
+export async function generatePriorArtSearchPlan(query: string) {
+  const fallback = buildPriorArtSearchPlanFallback(query);
+
+  try {
+    const parsed = await generateStructured({
+      name: "prior_art_search_plan",
+      schema: priorArtSearchPlanWireSchema,
+      instructions: [
+        "You rewrite startup ideas into better retrieval queries for prior-art and competitor search.",
+        "Return three plain-language search queries.",
+        "Each query must be a short noun phrase, not a full sentence.",
+        "Each query should usually be 5 to 12 words.",
+        "directQuery should stay close to the original idea in everyday language.",
+        "categoryQuery should broaden to the mainstream market/category terms a non-expert would search.",
+        "incumbentQuery should look for category leaders, major alternatives, and adjacent incumbents.",
+        "If an obvious mainstream incumbent or category label exists, it is acceptable to include it.",
+        "Strip unnecessary audience qualifiers and extra operating detail unless they define the market.",
+        "Avoid jargon, invented terms, and niche insider wording.",
+        "Each query should be short, web-search friendly, and understandable after one read.",
+      ].join(" "),
+      input: `Idea to cross-check: ${query}`,
+      maxOutputTokens: 800,
+    });
+
+    return parsePriorArtSearchPlanPayload(parsed);
+  } catch {
+    return fallback;
+  }
 }
 
 export async function generateIdeaTeasers({
