@@ -25,16 +25,16 @@ Use:
 
 ## Migrations
 
-Run both migrations in Supabase SQL editor:
+Run the single setup file in the Supabase SQL editor:
 
-1. [0001_synaptic.sql](/Users/frankshen/Documents/GitHub/Synaptic/supabase/migrations/0001_synaptic.sql)
-2. [0002_auth_ownership.sql](/Users/frankshen/Documents/GitHub/Synaptic/supabase/migrations/0002_auth_ownership.sql)
+1. [0000_synaptic_full_setup.sql](/Users/frankshen/Documents/GitHub/Synaptic/supabase/migrations/0000_synaptic_full_setup.sql)
 
-The second migration adds:
+That setup file includes:
 
 - `user_id` ownership fields
 - RLS on `sessions`, `ideas`, and `idea_edges`
 - per-user select / insert / update / delete policies
+- async node hydration fields on `ideas`
 
 ## Dashboard configuration
 

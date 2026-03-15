@@ -5,10 +5,10 @@ Synaptic is a full-stack idea exploration app. A user enters one seed idea, gets
 ## Current product behavior
 
 - Start with one seed idea
-- Generate up to 5 top-level idea nodes
+- Generate up to 5 top-level teaser idea nodes
 - Expand a node into up to 5 child ideas
 - Render idea nodes as a clean circular graph
-- Open a modal on node click for full idea details
+- Open a modal on node click and hydrate the full idea dossier on demand
 - Run cross-check on demand from the node modal
 - Export a one-pager PDF
 - Sign in with email/password or Google
@@ -90,10 +90,9 @@ Recommended:
 
 1. Install dependencies
 2. Create `.env.local`
-3. Run [0001_synaptic.sql](/Users/frankshen/Documents/GitHub/Synaptic/supabase/migrations/0001_synaptic.sql)
-4. Run [0002_auth_ownership.sql](/Users/frankshen/Documents/GitHub/Synaptic/supabase/migrations/0002_auth_ownership.sql)
-5. Configure Supabase Auth URLs and Google provider settings from [auth.md](/Users/frankshen/Documents/GitHub/Synaptic/docs/auth.md)
-6. Start the app
+3. Run [0000_synaptic_full_setup.sql](/Users/frankshen/Documents/GitHub/Synaptic/supabase/migrations/0000_synaptic_full_setup.sql)
+4. Configure Supabase Auth URLs and Google provider settings from [auth.md](/Users/frankshen/Documents/GitHub/Synaptic/docs/auth.md)
+5. Start the app
 
 ```bash
 npm install

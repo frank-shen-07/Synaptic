@@ -8,9 +8,11 @@ import type {
   OnePager,
   Tension,
 } from "@/lib/graph/schema";
+import { emptyNodeDetails } from "@/lib/graph/schema";
 import {
   analyzeSessionWithAI,
-  generateIdeaBlueprints,
+  generateIdeaTeasers,
+  generateNodeDetails,
   generateOnePagerWithAI,
 } from "@/lib/integrations/openai";
 import { clamp } from "@/lib/utils";
@@ -41,6 +43,9 @@ function createNode(
     severity: partial.severity ?? null,
     generated: partial.generated ?? false,
     details: partial.details,
+    contentState: partial.contentState ?? "ready",
+    contentError: partial.contentError ?? null,
+    hydratedAt: partial.hydratedAt ?? null,
     crosscheckQuery: partial.crosscheckQuery ?? `${partial.label} ${partial.summary}`,
     priorArt: partial.priorArt ?? [],
     crosscheckedAt: partial.crosscheckedAt ?? null,
@@ -82,6 +87,10 @@ function summarizeNode(node: GraphNodeRecord) {
     .join(" ");
 }
 
+function hasNodeDetails(node: GraphNodeRecord) {
+  return Object.values(node.details).some((items) => items.length > 0);
+}
+
 function average(values: number[]) {
   if (values.length === 0) {
     return 0;
@@ -115,19 +124,35 @@ async function refreshSessionInsights(session: GraphSession) {
     ? clamp(1 - average(uniquePriorArt.map((hit) => hit.matchScore)) * 0.85, 0.08, 0.95)
     : 0.72;
 
+  session.insights = {
+    originalityScore,
+    priorArt: uniquePriorArt,
+    challenges: session.insights.challenges,
+    tensions: session.insights.tensions,
+  };
+
+  const highlightedNodeIds = new Set(session.insights.tensions.flatMap((tension) => tension.nodeIds));
+
+  session.graph.edges = session.graph.edges.map((edge) => ({
+    ...edge,
+    highlighted: highlightedNodeIds.has(edge.source) || highlightedNodeIds.has(edge.target),
+  }));
+}
+
+async function refreshSessionInsightsWithAnalysis(session: GraphSession) {
+  await refreshSessionInsights(session);
+
   const aiAnalysis = await analyzeSessionWithAI({
     ...session,
     insights: {
       ...session.insights,
-      priorArt: uniquePriorArt,
     },
   });
   const tensions = mapTensionsToNodes(session.graph.nodes, aiAnalysis.tensions);
   const highlightedNodeIds = new Set(tensions.flatMap((tension) => tension.nodeIds));
 
   session.insights = {
-    originalityScore,
-    priorArt: uniquePriorArt,
+    ...session.insights,
     challenges: aiAnalysis.challenges,
     tensions,
   };
@@ -136,6 +161,23 @@ async function refreshSessionInsights(session: GraphSession) {
     ...edge,
     highlighted: highlightedNodeIds.has(edge.source) || highlightedNodeIds.has(edge.target),
   }));
+}
+
+function getHydrationTarget(session: GraphSession, nodeId: string) {
+  const targetNode = session.graph.nodes.find((node) => node.id === nodeId);
+
+  if (!targetNode || targetNode.status === "seed") {
+    return null;
+  }
+
+  const parentNode = targetNode.parentId
+    ? session.graph.nodes.find((node) => node.id === targetNode.parentId) ?? null
+    : null;
+
+  return {
+    targetNode,
+    parentNode,
+  };
 }
 
 function buildSeedNode(seed: string): GraphNodeRecord {
@@ -160,6 +202,8 @@ function buildSeedNode(seed: string): GraphNodeRecord {
       openQuestions: ["Which directions are worth exploring first?"],
       tensions: ["breadth vs specificity"],
     },
+    contentState: "ready",
+    hydratedAt: new Date().toISOString(),
     crosscheckQuery: seed,
   });
 }
@@ -173,7 +217,7 @@ async function buildChildIdeas({
   parent: GraphNodeRecord;
   siblingLabels?: string[];
 }) {
-  const generated = await generateIdeaBlueprints({
+  const generated = await generateIdeaTeasers({
     seed,
     focus: parent.type === "seed" ? undefined : parent,
     siblingLabels,
@@ -184,13 +228,15 @@ async function buildChildIdeas({
       label: idea.label,
       type: idea.type,
       summary: idea.summary,
-      details: idea.details,
+      details: structuredClone(emptyNodeDetails),
       parentId: parent.id,
       depth: parent.depth + 1,
       detailLevel: parent.detailLevel + 1,
       confidence: clamp(0.84 - index * 0.05 - parent.depth * 0.04, 0.45, 0.9),
       weight: clamp(1.12 - parent.depth * 0.14, 0.48, 1.2),
       expandable: parent.depth + 1 < 3,
+      generated: true,
+      contentState: "stub",
       crosscheckQuery: `${idea.label}. ${idea.summary}`,
     });
 
@@ -258,8 +304,58 @@ export async function expandNode(session: GraphSession, nodeId: string, _mode: "
   targetNode.expandable =
     session.graph.nodes.filter((node) => node.parentId === targetNode.id).length < MAX_CHILD_IDEAS;
   targetNode.confidence = clamp(targetNode.confidence + 0.02, 0.2, 0.95);
+  session.onePager = null;
   session.updatedAt = new Date().toISOString();
 
+  await refreshSessionInsights(session);
+
+  return session;
+}
+
+export async function hydrateNode(session: GraphSession, nodeId: string) {
+  const hydrationTarget = getHydrationTarget(session, nodeId);
+
+  if (!hydrationTarget) {
+    return session;
+  }
+
+  const { targetNode, parentNode } = hydrationTarget;
+
+  if (targetNode.contentState === "ready" && hasNodeDetails(targetNode)) {
+    return session;
+  }
+  const hydrated = await generateNodeDetails({
+    seed: session.seed,
+    node: targetNode,
+    parent: parentNode,
+  });
+
+  await applyHydratedNodeDetails(session, nodeId, hydrated);
+
+  return session;
+}
+
+export async function applyHydratedNodeDetails(
+  session: GraphSession,
+  nodeId: string,
+  hydrated: Awaited<ReturnType<typeof generateNodeDetails>>,
+) {
+  const hydrationTarget = getHydrationTarget(session, nodeId);
+
+  if (!hydrationTarget) {
+    return session;
+  }
+
+  const { targetNode } = hydrationTarget;
+  targetNode.details = hydrated.details;
+  targetNode.crosscheckQuery = hydrated.crosscheckQuery;
+  targetNode.contentState = "ready";
+  targetNode.contentError = null;
+  targetNode.hydratedAt = new Date().toISOString();
+  targetNode.confidence = clamp(targetNode.confidence + 0.03, 0.25, 0.95);
+
+  session.onePager = null;
+  session.updatedAt = new Date().toISOString();
   await refreshSessionInsights(session);
 
   return session;
@@ -282,6 +378,7 @@ export async function crosscheckNode(session: GraphSession, nodeId: string) {
   targetNode.crosscheckedAt = new Date().toISOString();
   targetNode.confidence = clamp(targetNode.confidence - 0.03, 0.25, 0.95);
 
+  session.onePager = null;
   session.updatedAt = new Date().toISOString();
   await refreshSessionInsights(session);
 
@@ -350,6 +447,7 @@ export async function deleteNode(session: GraphSession, nodeId: string) {
 }
 
 export async function generateOnePager(session: GraphSession): Promise<OnePager> {
+  await refreshSessionInsightsWithAnalysis(session);
   const onePager = await generateOnePagerWithAI(session);
   session.onePager = onePager;
   session.updatedAt = new Date().toISOString();

@@ -27,6 +27,9 @@ create table if not exists public.ideas (
   severity text,
   source_urls jsonb not null default '[]'::jsonb,
   details jsonb not null,
+  content_status text not null default 'ready',
+  content_error text,
+  hydrated_at timestamptz,
   prior_art jsonb not null default '[]'::jsonb,
   crosscheck_query text,
   crosschecked_at timestamptz,
@@ -55,6 +58,15 @@ alter table public.ideas
 
 alter table public.idea_edges
   add column if not exists user_id uuid references auth.users(id) on delete cascade;
+
+alter table public.ideas
+  add column if not exists content_status text not null default 'ready';
+
+alter table public.ideas
+  add column if not exists content_error text;
+
+alter table public.ideas
+  add column if not exists hydrated_at timestamptz;
 
 create index if not exists ideas_session_id_idx on public.ideas(session_id);
 create index if not exists ideas_parent_id_idx on public.ideas(parent_id);

@@ -26,44 +26,47 @@ const nodeDetailsSchema = z.object({
   tensions: z.array(z.string()).min(1).max(3),
 });
 
-const ideaBlueprintSchema = z.object({
+const ideaTypeSchema = z.enum([
+  "inspiration",
+  "target_audience",
+  "technical_constraints",
+  "business_constraints",
+  "prior_art",
+  "open_questions",
+]);
+
+const ideaTeaserSchema = z.object({
   label: z.string().min(6).max(64),
   summary: z.string().min(20).max(240),
   edgeLabel: z.string().min(3).max(24),
   edgeExplanation: z.string().min(12).max(180),
-  type: z.enum([
-    "inspiration",
-    "target_audience",
-    "technical_constraints",
-    "business_constraints",
-    "prior_art",
-    "open_questions",
-  ]),
-  details: nodeDetailsSchema,
+  type: ideaTypeSchema,
 });
 
-const ideaBlueprintResponseSchema = z.object({
-  ideas: z.array(ideaBlueprintSchema).min(3).max(5),
+const ideaTeaserResponseSchema = z.object({
+  ideas: z.array(ideaTeaserSchema).min(3).max(5),
 });
 
-const ideaBlueprintWireSchema = z.object({
+const ideaTeaserWireSchema = z.object({
   label: z.string().min(6).max(96),
   summary: z.string().min(20),
   edgeLabel: z.string().min(3).max(40),
   edgeExplanation: z.string().min(12),
-  type: z.enum([
-    "inspiration",
-    "target_audience",
-    "technical_constraints",
-    "business_constraints",
-    "prior_art",
-    "open_questions",
-  ]),
-  details: nodeDetailsSchema,
+  type: ideaTypeSchema,
 });
 
-const ideaBlueprintWireResponseSchema = z.object({
-  ideas: z.array(ideaBlueprintWireSchema).min(3).max(5),
+const ideaTeaserWireResponseSchema = z.object({
+  ideas: z.array(ideaTeaserWireSchema).min(3).max(5),
+});
+
+const ideaNodeHydrationSchema = z.object({
+  details: nodeDetailsSchema,
+  crosscheckQuery: z.string().min(12).max(280),
+});
+
+const ideaNodeHydrationWireSchema = z.object({
+  details: nodeDetailsSchema,
+  crosscheckQuery: z.string().min(12),
 });
 
 const analysisSchema = z.object({
@@ -190,7 +193,7 @@ function fitWithinLimit(value: string, maxLength: number, sentence = false) {
   return withPunctuation.length <= maxLength ? withPunctuation : `${withPunctuation.slice(0, maxLength - 1).trimEnd()}.`;
 }
 
-function normalizeIdeaBlueprintPayload(payload: z.infer<typeof ideaBlueprintWireResponseSchema>) {
+function normalizeIdeaTeaserPayload(payload: z.infer<typeof ideaTeaserWireResponseSchema>) {
   return {
     ideas: payload.ideas.map((idea) => ({
       ...idea,
@@ -198,18 +201,78 @@ function normalizeIdeaBlueprintPayload(payload: z.infer<typeof ideaBlueprintWire
       summary: fitWithinLimit(idea.summary, 240, true),
       edgeLabel: fitWithinLimit(idea.edgeLabel, 24),
       edgeExplanation: fitWithinLimit(idea.edgeExplanation, 180, true),
-      details: {
-        inspiration: idea.details.inspiration.map(cleanSentence),
-        targetAudience: idea.details.targetAudience.map(cleanSentence),
-        technicalConstraints: idea.details.technicalConstraints.map(cleanSentence),
-        businessConstraints: idea.details.businessConstraints.map(cleanSentence),
-        risksFailureModes: idea.details.risksFailureModes.map(cleanSentence),
-        adjacentAnalogies: idea.details.adjacentAnalogies.map(cleanPhrase),
-        openQuestions: idea.details.openQuestions.map(cleanSentence),
-        tensions: idea.details.tensions.map(cleanPhrase),
-      },
     })),
   };
+}
+
+function normalizeNodeHydrationPayload(payload: z.infer<typeof ideaNodeHydrationWireSchema>) {
+  return {
+    details: {
+      inspiration: payload.details.inspiration.map(cleanSentence),
+      targetAudience: payload.details.targetAudience.map(cleanSentence),
+      technicalConstraints: payload.details.technicalConstraints.map(cleanSentence),
+      businessConstraints: payload.details.businessConstraints.map(cleanSentence),
+      risksFailureModes: payload.details.risksFailureModes.map(cleanSentence),
+      adjacentAnalogies: payload.details.adjacentAnalogies.map(cleanPhrase),
+      openQuestions: payload.details.openQuestions.map(cleanSentence),
+      tensions: payload.details.tensions.map(cleanPhrase),
+    },
+    crosscheckQuery: fitWithinLimit(payload.crosscheckQuery, 280),
+  };
+}
+
+function buildNodeDetailsPrompt({
+  seed,
+  node,
+  parent,
+}: {
+  seed: string;
+  node: GraphNodeRecord;
+  parent?: GraphNodeRecord | null;
+}) {
+  const parentNotes = parent && hasDetails(parent.details) ? `Parent notes:\n${stringifyDetails(parent.details)}` : "";
+
+  return [
+    `Seed: ${seed}`,
+    `Selected idea: ${node.label}`,
+    `Idea summary: ${node.summary}`,
+    parent ? `Parent idea: ${parent.label}` : "",
+    parent ? `Parent summary: ${parent.summary}` : "",
+    parentNotes,
+    "Generate the full dossier for this single idea.",
+    "Return concrete product, customer, market, and execution notes.",
+    "Also return a strong cross-check query that would work well for similarity search.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function getNodeDetailsInstructions() {
+  return [
+    "You are a product strategist fleshing out one startup idea into a concise dossier.",
+    "Be concrete and commercially literate.",
+    "Each sentence-style item must be complete and must not end mid-phrase.",
+    "Make the crosscheckQuery specific enough for prior-art and adjacent-solution lookup.",
+    "Do not repeat the same point across sections unless it is essential.",
+  ].join(" ");
+}
+
+function parseNodeHydrationWirePayload(payload: unknown) {
+  return ideaNodeHydrationWireSchema.parse(payload);
+}
+
+export function parseNodeDetailsPayload(payload: unknown) {
+  return ideaNodeHydrationSchema.parse(normalizeNodeHydrationPayload(parseNodeHydrationWirePayload(payload)));
+}
+
+function hasDetails(details: NodeDetails) {
+  return Object.values(details).some((items) => items.length > 0);
+}
+
+function formatNodeForPrompt(node: GraphNodeRecord) {
+  return hasDetails(node.details)
+    ? `${node.label}: ${node.summary}\n${stringifyDetails(node.details)}`
+    : `${node.label}: ${node.summary}\nDetails: pending hydration.`;
 }
 
 async function generateStructured<T>({
@@ -297,7 +360,7 @@ async function generateStructured<T>({
   throw lastError ?? new Error(`OpenAI returned no parsed output for ${name} and no recoverable text payload.`);
 }
 
-export async function generateIdeaBlueprints({
+export async function generateIdeaTeasers({
   seed,
   focus,
   siblingLabels,
@@ -311,14 +374,14 @@ export async function generateIdeaBlueprints({
         `Seed: ${seed}`,
         `Selected idea to expand: ${focus.label}`,
         `Selected idea summary: ${focus.summary}`,
-        stringifyDetails(focus.details),
+        hasDetails(focus.details) ? stringifyDetails(focus.details) : "",
         siblingLabels?.length ? `Existing child labels: ${siblingLabels.join("; ")}` : "",
         "Generate up to 5 genuinely distinct follow-on business ideas.",
         "Do not produce UI concepts, graph concepts, or meta-tooling descriptions.",
         "Each label must read like a real venture direction or product concept.",
       ]
         .filter(Boolean)
-        .join("\n\n")
+      .join("\n\n")
     : [
         `Seed: ${seed}`,
         "Generate up to 5 distinct venture directions that could realistically be built from this seed.",
@@ -329,28 +392,72 @@ export async function generateIdeaBlueprints({
   const instructions = [
     "You are a startup strategist generating concrete business directions from a seed concept.",
     "Return thoughtful, non-generic ideas.",
+    "Return teaser-level ideas only: label, short summary, relationship label, relationship explanation, and type.",
+    "Do not generate detailed dossiers or category bullet lists in this step.",
     "The headings content should read like investment memo notes for that specific idea, not filler or UI commentary.",
     "Avoid repeating the seed verbatim in every label unless necessary.",
     "Avoid abstract labels like workspace, radar, bridge, scout, studio unless the concept truly requires them.",
-    "Every summary, explanation, and sentence-style detail item must be complete and must not end mid-phrase.",
+    "Every summary and explanation must be complete and must not end mid-phrase.",
     "Respect these hard limits: label <= 64 characters, summary <= 240 characters, edgeLabel <= 24 characters, edgeExplanation <= 180 characters.",
   ].join(" ");
 
   const parsed = await generateStructured({
-    name: "idea_blueprints",
-    schema: ideaBlueprintWireResponseSchema,
+    name: "idea_teasers",
+    schema: ideaTeaserWireResponseSchema,
     instructions,
     input: prompt,
-    maxOutputTokens: 7000,
+    maxOutputTokens: 2600,
   });
 
-  return ideaBlueprintResponseSchema.parse(normalizeIdeaBlueprintPayload(parsed));
+  return ideaTeaserResponseSchema.parse(normalizeIdeaTeaserPayload(parsed));
+}
+
+export async function generateNodeDetails({
+  seed,
+  node,
+  parent,
+}: {
+  seed: string;
+  node: GraphNodeRecord;
+  parent?: GraphNodeRecord | null;
+}) {
+  const parsed = await generateStructured({
+    name: "idea_node_hydration",
+    schema: ideaNodeHydrationWireSchema,
+    instructions: getNodeDetailsInstructions(),
+    input: buildNodeDetailsPrompt({ seed, node, parent }),
+    maxOutputTokens: 5200,
+  });
+
+  return parseNodeDetailsPayload(parsed);
+}
+
+export function streamNodeDetails({
+  seed,
+  node,
+  parent,
+}: {
+  seed: string;
+  node: GraphNodeRecord;
+  parent?: GraphNodeRecord | null;
+}) {
+  return getClient().responses.stream({
+    model: env.openai.model(),
+    instructions: getNodeDetailsInstructions(),
+    input: buildNodeDetailsPrompt({ seed, node, parent }),
+    text: {
+      format: zodTextFormat(ideaNodeHydrationWireSchema, "idea_node_hydration"),
+      verbosity: "medium",
+    },
+    max_output_tokens: 5200,
+    truncation: "disabled",
+  });
 }
 
 export async function analyzeSessionWithAI(session: GraphSession) {
   const ideas = session.graph.nodes
     .filter((node) => node.type !== "seed")
-    .map((node) => `${node.label}: ${node.summary}\n${stringifyDetails(node.details)}`)
+    .map((node) => formatNodeForPrompt(node))
     .join("\n\n");
 
   const prompt = [

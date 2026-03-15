@@ -24,6 +24,19 @@ export const nodeDetailsSchema = z.object({
   tensions: z.array(z.string()).max(5),
 });
 
+export const emptyNodeDetails = {
+  inspiration: [],
+  targetAudience: [],
+  technicalConstraints: [],
+  businessConstraints: [],
+  risksFailureModes: [],
+  adjacentAnalogies: [],
+  openQuestions: [],
+  tensions: [],
+} satisfies z.input<typeof nodeDetailsSchema>;
+
+export const nodeContentStateSchema = z.enum(["stub", "loading", "ready", "error"]);
+
 export const priorArtHitSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -48,16 +61,10 @@ export const graphNodeSchema = z.object({
   sourceUrls: z.array(z.string().url()).default([]),
   severity: z.enum(["low", "medium", "high"]).nullable().default(null),
   generated: z.boolean().default(false),
-  details: nodeDetailsSchema.default({
-    inspiration: [],
-    targetAudience: [],
-    technicalConstraints: [],
-    businessConstraints: [],
-    risksFailureModes: [],
-    adjacentAnalogies: [],
-    openQuestions: [],
-    tensions: [],
-  }),
+  details: nodeDetailsSchema.default(emptyNodeDetails),
+  contentState: nodeContentStateSchema.default("ready"),
+  contentError: z.string().nullable().default(null),
+  hydratedAt: z.string().nullable().default(null),
   crosscheckQuery: z.string().nullable().default(null),
   priorArt: z.array(priorArtHitSchema).default([]),
   crosscheckedAt: z.string().nullable().default(null),
@@ -126,6 +133,10 @@ export const crosscheckNodeInputSchema = z.object({
   nodeId: z.string(),
 });
 
+export const hydrateNodeInputSchema = z.object({
+  nodeId: z.string(),
+});
+
 export const deleteNodeInputSchema = z.object({
   nodeId: z.string(),
 });
@@ -141,4 +152,5 @@ export type GraphSession = z.infer<typeof graphSessionSchema>;
 export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
 export type ExpandNodeInput = z.infer<typeof expandNodeInputSchema>;
 export type CrosscheckNodeInput = z.infer<typeof crosscheckNodeInputSchema>;
+export type HydrateNodeInput = z.infer<typeof hydrateNodeInputSchema>;
 export type DeleteNodeInput = z.infer<typeof deleteNodeInputSchema>;

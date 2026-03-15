@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useLayoutEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useTransition } from "react";
 
 import { DismissibleNotice } from "./dismissible-notice";
 import { ForceGraph } from "./force-graph";
@@ -36,6 +36,35 @@ type ProcessingKind = "expand" | "crosscheck" | "onepager" | "delete";
 type ProcessingState = {
   kind: ProcessingKind;
   nodeLabel?: string;
+};
+
+type HydrationStreamLine =
+  | {
+      type: "delta";
+      snapshot: string;
+    }
+  | {
+      type: "complete";
+      session: GraphSession;
+    }
+  | {
+      type: "error";
+      message: string;
+    };
+
+type StreamingSectionState = {
+  started: boolean;
+  items: string[];
+  partial: string | null;
+};
+
+type StreamingHydrationDraft = {
+  details: Record<keyof GraphNodeRecord["details"], StreamingSectionState>;
+  crosscheckQuery: {
+    started: boolean;
+    value: string;
+    partial: string | null;
+  };
 };
 
 const NODE_ACCENTS: Record<WorkbenchTheme, Record<GraphNodeRecord["type"], string>> = {
@@ -78,6 +107,183 @@ const detailSections: Array<{
   { key: "openQuestions", label: "Open questions" },
   { key: "tensions", label: "Tensions" },
 ];
+
+function decodeEscapedCharacter(character: string) {
+  if (character === "n") return "\n";
+  if (character === "r") return "\r";
+  if (character === "t") return "\t";
+  if (character === "b") return "\b";
+  if (character === "f") return "\f";
+  return character;
+}
+
+function findJsonKeyValueStart(snapshot: string, key: string) {
+  const keyIndex = snapshot.indexOf(`"${key}"`);
+
+  if (keyIndex === -1) {
+    return -1;
+  }
+
+  const colonIndex = snapshot.indexOf(":", keyIndex);
+
+  return colonIndex === -1 ? -1 : colonIndex + 1;
+}
+
+function readJsonStringArray(snapshot: string, key: string): StreamingSectionState {
+  const startIndex = findJsonKeyValueStart(snapshot, key);
+
+  if (startIndex === -1) {
+    return {
+      started: false,
+      items: [],
+      partial: null,
+    };
+  }
+
+  const bracketIndex = snapshot.indexOf("[", startIndex);
+
+  if (bracketIndex === -1) {
+    return {
+      started: true,
+      items: [],
+      partial: null,
+    };
+  }
+
+  const items: string[] = [];
+  let current = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let index = bracketIndex + 1; index < snapshot.length; index += 1) {
+    const character = snapshot[index];
+
+    if (inString) {
+      if (escaped) {
+        current += decodeEscapedCharacter(character);
+        escaped = false;
+        continue;
+      }
+
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (character === '"') {
+        items.push(current);
+        current = "";
+        inString = false;
+        continue;
+      }
+
+      current += character;
+      continue;
+    }
+
+    if (character === '"') {
+      current = "";
+      inString = true;
+      continue;
+    }
+
+    if (character === "]") {
+      return {
+        started: true,
+        items,
+        partial: null,
+      };
+    }
+  }
+
+  return {
+    started: true,
+    items,
+    partial: inString ? current : null,
+  };
+}
+
+function readJsonStringValue(snapshot: string, key: string) {
+  const startIndex = findJsonKeyValueStart(snapshot, key);
+
+  if (startIndex === -1) {
+    return {
+      started: false,
+      value: "",
+      partial: null,
+    };
+  }
+
+  const quoteIndex = snapshot.indexOf('"', startIndex);
+
+  if (quoteIndex === -1) {
+    return {
+      started: true,
+      value: "",
+      partial: null,
+    };
+  }
+
+  let value = "";
+  let escaped = false;
+
+  for (let index = quoteIndex + 1; index < snapshot.length; index += 1) {
+    const character = snapshot[index];
+
+    if (escaped) {
+      value += decodeEscapedCharacter(character);
+      escaped = false;
+      continue;
+    }
+
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+
+    if (character === '"') {
+      return {
+        started: true,
+        value,
+        partial: null,
+      };
+    }
+
+    value += character;
+  }
+
+  return {
+    started: true,
+    value: "",
+    partial: value,
+  };
+}
+
+function parseHydrationSnapshot(snapshot: string): StreamingHydrationDraft {
+  const details = detailSections.reduce<Record<keyof GraphNodeRecord["details"], StreamingSectionState>>(
+    (draft, section) => {
+      draft[section.key] = readJsonStringArray(snapshot, section.key);
+      return draft;
+    },
+    {
+      inspiration: { started: false, items: [], partial: null },
+      targetAudience: { started: false, items: [], partial: null },
+      technicalConstraints: { started: false, items: [], partial: null },
+      businessConstraints: { started: false, items: [], partial: null },
+      risksFailureModes: { started: false, items: [], partial: null },
+      adjacentAnalogies: { started: false, items: [], partial: null },
+      openQuestions: { started: false, items: [], partial: null },
+      tensions: { started: false, items: [], partial: null },
+    },
+  );
+
+  const crosscheckQuery = readJsonStringValue(snapshot, "crosscheckQuery");
+
+  return {
+    details,
+    crosscheckQuery,
+  };
+}
 
 function isGraphSession(payload: unknown): payload is GraphSession {
   return Boolean(
@@ -129,6 +335,20 @@ function getProcessingCopy(state: ProcessingState | null) {
   };
 }
 
+function updateNode(
+  session: GraphSession,
+  nodeId: string,
+  updater: (node: GraphNodeRecord) => GraphNodeRecord,
+): GraphSession {
+  return {
+    ...session,
+    graph: {
+      ...session.graph,
+      nodes: session.graph.nodes.map((node) => (node.id === nodeId ? updater(node) : node)),
+    },
+  };
+}
+
 function TypingStatus({ text }: { text: string }) {
   const measureRef = useRef<HTMLSpanElement>(null);
   const [typingWidth, setTypingWidth] = useState<number | null>(null);
@@ -170,9 +390,11 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [processingState, setProcessingState] = useState<ProcessingState | null>(null);
+  const [hydrationSnapshot, setHydrationSnapshot] = useState<{ nodeId: string; snapshot: string } | null>(null);
   const [resetViewVersion, setResetViewVersion] = useState(0);
   const [mode3d, setMode3d] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const activeHydrationsRef = useRef(new Set<string>());
 
   const selectedNode =
     session.graph.nodes.find((node) => node.id === selectedNodeId) ??
@@ -180,6 +402,7 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
     null;
 
   const handleNodeClick = useCallback((nodeId: string) => {
+    setHydrationSnapshot(null);
     setSelectedNodeId(nodeId);
     setIsModalOpen(true);
   }, []);
@@ -240,6 +463,113 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
       setProcessingState(null);
     }
   }
+
+  const hydrateNodeDetails = useCallback(
+    async (node: GraphNodeRecord) => {
+      if (node.contentState === "ready" || node.status === "seed" || activeHydrationsRef.current.has(node.id)) {
+        return;
+      }
+
+      setNotice(null);
+      activeHydrationsRef.current.add(node.id);
+      setSession((current) =>
+        updateNode(current, node.id, (currentNode) => ({
+          ...currentNode,
+          contentState: "loading",
+          contentError: null,
+        })),
+      );
+      setHydrationSnapshot({ nodeId: node.id, snapshot: "" });
+
+      try {
+        const response = await fetch(`/api/sessions/${session.id}/hydrate`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ nodeId: node.id }),
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json()) as unknown;
+          const message =
+            payload && typeof payload === "object" && "error" in payload
+              ? String(payload.error)
+              : "Could not generate node details.";
+          throw new Error(message);
+        }
+
+        if (!response.body) {
+          throw new Error("Node detail stream was unavailable.");
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let completed = false;
+
+        while (true) {
+          const { value, done } = await reader.read();
+
+          if (done) {
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          let newlineIndex = buffer.indexOf("\n");
+
+          while (newlineIndex !== -1) {
+            const line = buffer.slice(0, newlineIndex).trim();
+            buffer = buffer.slice(newlineIndex + 1);
+
+            if (line) {
+              const event = JSON.parse(line) as HydrationStreamLine;
+
+              if (event.type === "delta") {
+                setHydrationSnapshot({ nodeId: node.id, snapshot: event.snapshot });
+              } else if (event.type === "complete") {
+                completed = true;
+                setHydrationSnapshot(null);
+                setSession(event.session);
+              } else if (event.type === "error") {
+                throw new Error(event.message);
+              }
+            }
+
+            newlineIndex = buffer.indexOf("\n");
+          }
+        }
+
+        if (!completed) {
+          throw new Error("Node detail stream ended before completion.");
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not generate node details.";
+        setHydrationSnapshot(null);
+        setSession((current) =>
+          updateNode(current, node.id, (currentNode) => ({
+            ...currentNode,
+            contentState: "error",
+            contentError: message,
+          })),
+        );
+        setNotice(message);
+      } finally {
+        activeHydrationsRef.current.delete(node.id);
+      }
+    },
+    [session.id],
+  );
+
+  useEffect(() => {
+    if (!isModalOpen || !selectedNode || processingState || isPending) {
+      return;
+    }
+
+    if (selectedNode.contentState !== "stub") {
+      return;
+    }
+
+    void hydrateNodeDetails(selectedNode);
+  }, [hydrateNodeDetails, isModalOpen, isPending, processingState, selectedNode]);
 
   async function generateBrief() {
     setNotice(null);
@@ -309,6 +639,12 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
       ? `0 18px 34px color-mix(in srgb, ${nodeAccent} 26%, transparent)`
       : `0 16px 30px color-mix(in srgb, ${nodeAccent} 18%, transparent)`;
   const busy = Boolean(processingState) || isPending;
+  const selectedNodeDetailsPending =
+    selectedNode?.contentState === "stub" || selectedNode?.contentState === "loading";
+  const selectedNodeHydrationDraft =
+    selectedNode && hydrationSnapshot?.nodeId === selectedNode.id
+      ? parseHydrationSnapshot(hydrationSnapshot.snapshot)
+      : null;
 
   return (
     <div
@@ -509,6 +845,19 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
                 {session.graph.nodes.filter((node) => node.parentId === selectedNode.id).length}/5
                 child ideas
               </span>
+              {selectedNode.status !== "seed" ? (
+                <span className="rounded-full border border-[color:var(--line)] px-3 py-1">
+                  {selectedNode.contentState === "ready"
+                    ? selectedNode.hydratedAt
+                      ? `Dossier ready ${formatUtcTimestamp(selectedNode.hydratedAt)}`
+                      : "Dossier ready"
+                    : selectedNode.contentState === "loading"
+                      ? "Generating dossier"
+                      : selectedNode.contentState === "error"
+                        ? "Dossier failed"
+                        : "Teaser only"}
+                </span>
+              ) : null}
               {selectedNode.crosscheckedAt ? (
                 <span
                   className="rounded-full border px-3 py-1"
@@ -522,6 +871,19 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
                 </span>
               ) : null}
             </div>
+
+            {selectedNode.contentState === "loading" ? (
+              <div
+                className="mt-4 inline-flex items-center gap-3 rounded-full border border-[color:var(--line)] px-4 py-2 text-sm font-semibold text-[var(--foreground)]"
+                style={{ background: "var(--card-soft)" }}
+              >
+                <span
+                  className="h-2.5 w-2.5 animate-pulse rounded-full"
+                  style={{ background: nodeAccent, boxShadow: `0 0 14px ${nodeAccent}` }}
+                />
+                <TypingStatus text="Generating notes" />
+              </div>
+            ) : null}
 
             <div className="mt-6 flex flex-wrap gap-3">
               <button
@@ -550,12 +912,23 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
                     "crosscheck",
                   )
                 }
-                disabled={busy}
+                disabled={busy || selectedNode.contentState === "loading"}
                 className="inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] bg-[var(--button-secondary)] px-4 py-3 text-sm font-semibold text-[var(--button-secondary-text)] transition hover:bg-[var(--button-secondary-hover)] disabled:cursor-wait disabled:opacity-60"
               >
                 <Search className="h-4 w-4" />
                 Cross-check for existing similar ideas
               </button>
+              {selectedNode.depth > 0 && selectedNode.contentState === "error" ? (
+                <button
+                  type="button"
+                  onClick={() => void hydrateNodeDetails(selectedNode)}
+                  disabled={busy}
+                  className="inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] bg-[var(--button-secondary)] px-4 py-3 text-sm font-semibold text-[var(--button-secondary-text)] transition hover:bg-[var(--button-secondary-hover)] disabled:cursor-wait disabled:opacity-60"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Retry dossier generation
+                </button>
+              ) : null}
               {selectedNode.depth > 0 ? (
                 <button
                   type="button"
@@ -598,9 +971,76 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
               </div>
             ) : null}
 
+            {selectedNode.status !== "seed" && selectedNode.contentState !== "ready" ? (
+              <section
+                className="mt-6 rounded-[1.5rem] border border-[color:var(--line)] p-4"
+                style={{ background: "var(--card-soft)" }}
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--foreground-soft)]">
+                  Node dossier
+                </p>
+                <p className="mt-2 text-sm leading-6 text-[var(--foreground-muted)]">
+                  {selectedNode.contentState === "loading"
+                    ? "Generating the deeper notes for this node now. The section cards below will fill in as content arrives."
+                    : selectedNode.contentState === "error"
+                      ? selectedNode.contentError ?? "Node detail generation failed."
+                      : "This node is still a teaser. Opening it starts the full dossier generation."}
+                </p>
+              </section>
+            ) : null}
+
             <div className="mt-8 grid gap-4 md:grid-cols-2">
               {detailSections.map((section) => {
-                const values = selectedNode.details[section.key];
+                const streamState = selectedNodeHydrationDraft?.details[section.key] ?? null;
+                const values =
+                  selectedNode.contentState === "loading" && streamState
+                    ? streamState.items
+                    : selectedNode.details[section.key];
+                const partialValue =
+                  selectedNode.contentState === "loading" && streamState?.partial ? streamState.partial : null;
+                let sectionContent: React.ReactNode;
+
+                if (values.length > 0 || partialValue) {
+                  sectionContent = (
+                    <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--foreground-muted)]">
+                      {values.map((value) => (
+                        <li
+                          key={value}
+                          className="rounded-[1rem] px-3 py-2"
+                          style={{ background: "var(--button-secondary)" }}
+                        >
+                          {value}
+                        </li>
+                      ))}
+                      {partialValue ? (
+                        <li
+                          className="rounded-[1rem] px-3 py-2 text-[var(--foreground)]"
+                          style={{ background: "var(--button-secondary)" }}
+                        >
+                          {partialValue}
+                          <span className="animate-pulse">▌</span>
+                        </li>
+                      ) : null}
+                    </ul>
+                  );
+                } else if (selectedNode.contentState === "loading") {
+                  sectionContent = (
+                    <p className="mt-3 text-sm leading-6 text-[var(--foreground-soft)]">
+                      Waiting for this section...
+                    </p>
+                  );
+                } else {
+                  sectionContent = (
+                    <p className="mt-3 text-sm leading-6 text-[var(--foreground-soft)]">
+                      {selectedNode.contentState === "error"
+                        ? "Generation failed for this section."
+                        : selectedNodeDetailsPending
+                          ? "Content is still generating."
+                          : "No content yet."}
+                    </p>
+                  );
+                }
+
                 return (
                   <section
                     key={section.key}
@@ -616,23 +1056,7 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
                     >
                       {section.label}
                     </p>
-                    {values.length === 0 ? (
-                      <p className="mt-3 text-sm leading-6 text-[var(--foreground-soft)]">
-                        No content yet.
-                      </p>
-                    ) : (
-                      <ul className="mt-3 space-y-2 text-sm leading-6 text-[var(--foreground-muted)]">
-                        {values.map((value) => (
-                          <li
-                            key={value}
-                            className="rounded-[1rem] px-3 py-2"
-                            style={{ background: "var(--button-secondary)" }}
-                          >
-                            {value}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                    {sectionContent}
                   </section>
                 );
               })}
