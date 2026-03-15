@@ -35,6 +35,13 @@ export const env = {
   jina: {
     apiKey: () => requireEnv("JINA_API_KEY"),
   },
+  elasticsearch: {
+    url: () => process.env.ELASTICSEARCH_URL,
+    index: () => process.env.ELASTICSEARCH_INDEX,
+    apiKey: () => process.env.ELASTICSEARCH_API_KEY,
+    username: () => process.env.ELASTICSEARCH_USERNAME,
+    password: () => process.env.ELASTICSEARCH_PASSWORD,
+  },
   github: {
     token: () => process.env.GITHUB_TOKEN,
   },

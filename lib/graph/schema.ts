@@ -42,7 +42,7 @@ export const priorArtHitSchema = z.object({
   title: z.string(),
   url: z.string().url(),
   snippet: z.string(),
-  source: z.enum(["Exa", "Patent", "GitHub"]),
+  source: z.enum(["Exa", "Patent", "GitHub", "Elasticsearch"]),
   matchScore: z.number().min(0).max(1),
 });
 

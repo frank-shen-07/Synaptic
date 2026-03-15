@@ -30,7 +30,7 @@ const steps = [
     number: "04",
     icon: "check",
     title: "Pressure-Test",
-    body: "Run Exa, patent, and GitHub cross-checks on demand. The reranked results feed back into critique and prior-art retrieval.",
+    body: "Run Exa, patent, GitHub, and optional Elasticsearch cross-checks on demand. The reranked results feed back into critique and prior-art retrieval.",
   },
   {
     number: "05",
@@ -72,7 +72,7 @@ const features = [
   {
     icon: Search,
     title: "Live Crosschecks",
-    body: "Run on-demand Exa, patent, and GitHub search, then rerank the combined results before surfacing the strongest matches.",
+    body: "Run on-demand Exa, patent, GitHub, and optional Elasticsearch search, then rerank the combined results before surfacing the strongest matches.",
   },
   {
     icon: FileText,
@@ -102,6 +102,7 @@ const stackGroups = [
       ["Exa", "Web + paper search"],
       ["Serper patents", "Patent lookup"],
       ["GitHub REST API", "Repository discovery"],
+      ["Elasticsearch", "Indexed corpus search"],
       ["Jina reranker", "Relevance ordering"],
     ],
   },

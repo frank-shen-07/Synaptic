@@ -14,7 +14,7 @@ Synaptic is a full-stack idea exploration app. A user enters one seed idea, gets
 - Sign in with email/password or Google
 - Verify email and reset passwords with Supabase Auth
 - Persist sessions, ideas, and edges in Supabase
-- Run Exa, patent, and GitHub cross-checks with Jina reranking
+- Run Exa, patent, GitHub, and optional Elasticsearch cross-checks with Jina reranking
 
 ## Stack
 
@@ -28,6 +28,7 @@ Synaptic is a full-stack idea exploration app. A user enters one seed idea, gets
 - Exa for web and paper search
 - Serper patents for patent lookup
 - GitHub search for repository discovery
+- Elasticsearch for indexed internal or domain-specific corpora
 - Jina reranker for prior-art ordering
 - Supabase for canonical persistence
 
@@ -45,6 +46,7 @@ The runtime split is:
   - Exa web and paper search
   - Serper patent search
   - GitHub repository search
+  - Optional Elasticsearch index search
   - Jina reranking for final match ordering
 
 - Supabase
@@ -80,11 +82,23 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 ```
 
+Optional Elasticsearch variables:
+
+```bash
+ELASTICSEARCH_URL=
+ELASTICSEARCH_INDEX=
+ELASTICSEARCH_API_KEY=
+ELASTICSEARCH_USERNAME=
+ELASTICSEARCH_PASSWORD=
+```
+
 Recommended:
 
 - Use `gpt-5-mini` for generation
 - `NEXT_PUBLIC_SUPABASE_URL` should usually match `SUPABASE_URL`
 - Do not use `SUPABASE_SERVICE_ROLE_KEY` in client-side code
+- Configure either `ELASTICSEARCH_API_KEY` or `ELASTICSEARCH_USERNAME` plus `ELASTICSEARCH_PASSWORD` if you want Elastic included in cross-checks
+- The Elasticsearch index should expose a canonical URL field and at least one text field such as `title`, `snippet`, `description`, `content`, `body`, or `text`
 
 ## Setup
 

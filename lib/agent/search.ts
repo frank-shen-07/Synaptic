@@ -10,8 +10,21 @@ let exaClient: Exa | null = null;
 const EXA_RESULT_COUNT = 8;
 const PATENT_RESULT_COUNT = 8;
 const GITHUB_RESULT_COUNT = 6;
+const ELASTICSEARCH_RESULT_COUNT = 8;
 const MAX_RERANK_CANDIDATES = 18;
 const FINAL_HIT_COUNT = 5;
+
+type ElasticsearchConfig =
+  | {
+      enabled: true;
+      index: string;
+      url: string;
+      authorization: string;
+    }
+  | {
+      enabled: false;
+      reason: string;
+    };
 
 function logCrosscheck(step: string, detail: Record<string, unknown>) {
   console.log(`[crosscheck] ${step}`, detail);
@@ -24,6 +37,16 @@ function getExaClient() {
 
 function collapseWhitespace(input: string) {
   return input.replace(/\s+/g, " ").trim();
+}
+
+function truncateText(input: string, maxCharacters: number) {
+  const normalized = collapseWhitespace(input);
+
+  if (normalized.length <= maxCharacters) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(maxCharacters - 3, 0)).trimEnd()}...`;
 }
 
 function similarity(query: string, text: string) {
@@ -47,6 +70,84 @@ function similarity(query: string, text: string) {
 function buildSnippet(parts: Array<string | null | undefined>, fallback: string) {
   const snippet = collapseWhitespace(parts.filter(Boolean).join(" "));
   return snippet || fallback;
+}
+
+function pickFirstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return collapseWhitespace(value);
+    }
+
+    if (Array.isArray(value)) {
+      const candidate = value.find((item): item is string => typeof item === "string" && item.trim().length > 0);
+
+      if (candidate) {
+        return collapseWhitespace(candidate);
+      }
+    }
+  }
+
+  return "";
+}
+
+function normalizeSearchScore(rawScore: number | null | undefined, fallback: number) {
+  if (typeof rawScore !== "number" || Number.isNaN(rawScore)) {
+    return clamp(fallback, 0, 1);
+  }
+
+  return clamp(1 - Math.exp(-rawScore / 5), 0, 1);
+}
+
+function getElasticsearchConfig(): ElasticsearchConfig {
+  const url = env.elasticsearch.url();
+  const index = env.elasticsearch.index();
+  const apiKey = env.elasticsearch.apiKey();
+  const username = env.elasticsearch.username();
+  const password = env.elasticsearch.password();
+
+  if (!url && !index && !apiKey && !username && !password) {
+    return {
+      enabled: false,
+      reason: "not_configured",
+    };
+  }
+
+  if (!url) {
+    return {
+      enabled: false,
+      reason: "missing_url",
+    };
+  }
+
+  if (!index) {
+    return {
+      enabled: false,
+      reason: "missing_index",
+    };
+  }
+
+  if (apiKey) {
+    return {
+      enabled: true,
+      url,
+      index,
+      authorization: `ApiKey ${apiKey}`,
+    };
+  }
+
+  if (username && password) {
+    return {
+      enabled: true,
+      url,
+      index,
+      authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`,
+    };
+  }
+
+  return {
+    enabled: false,
+    reason: "missing_auth",
+  };
 }
 
 function normalizeUrlKey(url: string) {
@@ -226,6 +327,136 @@ async function searchGithub(query: string): Promise<PriorArtHit[]> {
   return mapped;
 }
 
+async function searchElasticsearch(query: string): Promise<PriorArtHit[]> {
+  const config = getElasticsearchConfig();
+
+  if (!config.enabled) {
+    logCrosscheck("elasticsearch.skip", { query, reason: config.reason });
+    return [];
+  }
+
+  const endpoint = `${config.url.replace(/\/+$/, "")}/${encodeURIComponent(config.index)}/_search`;
+  logCrosscheck("elasticsearch.request", { query, index: config.index, url: endpoint });
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: config.authorization,
+    },
+    body: JSON.stringify({
+      size: ELASTICSEARCH_RESULT_COUNT,
+      track_total_hits: false,
+      _source: [
+        "title",
+        "name",
+        "headline",
+        "url",
+        "link",
+        "source_url",
+        "permalink",
+        "snippet",
+        "description",
+        "summary",
+        "content",
+        "body",
+        "text",
+      ],
+      query: {
+        bool: {
+          should: [
+            {
+              multi_match: {
+                query,
+                type: "best_fields",
+                fields: [
+                  "title^5",
+                  "name^4",
+                  "headline^4",
+                  "snippet^3",
+                  "description^3",
+                  "summary^2",
+                  "content",
+                  "body",
+                  "text",
+                ],
+                fuzziness: "AUTO",
+              },
+            },
+            { match_phrase: { title: { query, boost: 8 } } },
+            { match_phrase: { name: { query, boost: 6 } } },
+            { match_phrase: { headline: { query, boost: 6 } } },
+          ],
+          minimum_should_match: 1,
+        },
+      },
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    logCrosscheck("elasticsearch.response_error", {
+      query,
+      status: response.status,
+      statusText: response.statusText,
+      index: config.index,
+    });
+    return [];
+  }
+
+  const payload = (await response.json()) as {
+    hits?: {
+      hits?: Array<{
+        _id?: string;
+        _score?: number;
+        _source?: Record<string, unknown>;
+      }>;
+    };
+  };
+
+  const mapped: PriorArtHit[] = (payload.hits?.hits ?? []).flatMap((hit) => {
+    const source = hit._source ?? {};
+    const title =
+      pickFirstString(source.title, source.name, source.headline) || "Related Elasticsearch result";
+    const url = pickFirstString(source.url, source.link, source.source_url, source.permalink);
+
+    if (!url) {
+      return [];
+    }
+
+    const snippetText =
+      pickFirstString(
+        source.snippet,
+        source.description,
+        source.summary,
+        source.content,
+        source.body,
+        source.text,
+      ) || "Related result from Elasticsearch search.";
+    const snippet = truncateText(snippetText, 320);
+    const fallbackScore = similarity(query, `${title} ${snippet}`);
+
+    return [
+      {
+        id: hit._id || nanoid(),
+        title,
+        url,
+        snippet,
+        source: "Elasticsearch",
+        matchScore: normalizeSearchScore(hit._score, fallbackScore),
+      },
+    ];
+  });
+
+  logCrosscheck("elasticsearch.response", {
+    query,
+    count: mapped.length,
+    items: mapped.map((item) => ({ title: item.title, source: item.source, matchScore: item.matchScore, url: item.url })),
+  });
+
+  return mapped;
+}
+
 function deduplicateHits(hits: PriorArtHit[]) {
   const seen = new Set<string>();
 
@@ -343,16 +574,18 @@ function finalizeHitsWithPatentCoverage(hits: PriorArtHit[], maxHits: number) {
 }
 
 export async function crosscheckIdea(query: string, _excludeSessionId?: string) {
-  const [exaHits, patentHits, githubHits] = await Promise.allSettled([
+  const [exaHits, patentHits, githubHits, elasticsearchHits] = await Promise.allSettled([
     searchExa(query),
     searchPatents(query),
     searchGithub(query),
+    searchElasticsearch(query),
   ]);
 
   const deduplicatedHits = deduplicateHits([
     ...(exaHits.status === "fulfilled" ? exaHits.value : []),
     ...(patentHits.status === "fulfilled" ? patentHits.value : []),
     ...(githubHits.status === "fulfilled" ? githubHits.value : []),
+    ...(elasticsearchHits.status === "fulfilled" ? elasticsearchHits.value : []),
   ]);
 
   logCrosscheck("providers.summary", {
@@ -360,6 +593,8 @@ export async function crosscheckIdea(query: string, _excludeSessionId?: string) 
     exa: exaHits.status === "fulfilled" ? exaHits.value.length : `error: ${String(exaHits.reason)}`,
     patent: patentHits.status === "fulfilled" ? patentHits.value.length : `error: ${String(patentHits.reason)}`,
     github: githubHits.status === "fulfilled" ? githubHits.value.length : `error: ${String(githubHits.reason)}`,
+    elasticsearch:
+      elasticsearchHits.status === "fulfilled" ? elasticsearchHits.value.length : `error: ${String(elasticsearchHits.reason)}`,
     deduplicated: deduplicatedHits.length,
   });
 
