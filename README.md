@@ -100,14 +100,18 @@ npm install
 npm run dev
 ```
 
-`npm install` will pull in the graph renderer dependencies, including `d3` and the TypeScript dev types for it.
+`npm install` will pull in the graph renderer dependencies, including `d3`, `three`, and TypeScript dev types used by both renderers.
 
 If you are adding them manually for any reason:
 
 ```bash
 npm install d3
 npm install -D @types/d3
+npm install three
+npm install -D @types/three
 ```
+
+The graph view supports both a 2D D3 mode and an interactive 3D Three.js mode with camera reset and zoom-aware labels/descriptions.
 
 Open `http://localhost:3000`.
 

@@ -4,6 +4,7 @@ import { jsPDF } from "jspdf";
 import {
   ArrowLeft,
   ArrowRight,
+  Box,
   Copy,
   Download,
   LocateFixed,
@@ -170,6 +171,7 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [processingState, setProcessingState] = useState<ProcessingState | null>(null);
   const [resetViewVersion, setResetViewVersion] = useState(0);
+  const [mode3d, setMode3d] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const selectedNode =
@@ -316,7 +318,7 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
     >
       <main className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col gap-5 px-4 py-4 md:px-6 md:py-6">
         <header className="glass-panel rounded-[2rem] p-5 md:px-7 md:py-6 text-[var(--foreground)]">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <div className="flex items-center gap-3">
                 <Link
@@ -343,7 +345,7 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
             </div>
 
             <div
-              className="flex flex-wrap items-center gap-3"
+              className="flex flex-nowrap items-center gap-3"
               style={{ fontFamily: "var(--font-body)" }}
             >
               <button
@@ -359,6 +361,16 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
                 )}
                 {theme === "light" ? "Dark mode" : "Light mode"}
               </button>
+              <button
+                type="button"
+                onClick={() => setMode3d((v) => !v)}
+                className={`${secondaryButtonClass} border-[color:var(--line)] ${mode3d ? "bg-[var(--button-primary)] text-[var(--button-primary-text)]" : "bg-[var(--button-secondary)] text-[var(--button-secondary-text)] hover:bg-[var(--button-secondary-hover)]"}`}
+                aria-label="Toggle 3D view"
+              >
+                <Box className="h-4 w-4" />
+                {mode3d ? "2D view" : "3D view"}
+              </button>
+
               <button
                 type="button"
                 onClick={generateBrief}
@@ -441,6 +453,8 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
             onNodeClick={handleNodeClick}
             theme={theme}
             resetViewVersion={resetViewVersion}
+            mode3d={mode3d}
+            showSatellites={false}
           />
         </div>
       </section>
