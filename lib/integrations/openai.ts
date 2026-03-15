@@ -97,6 +97,112 @@ const onePagerSchema = z.object({
 const danglingEndingPattern =
   /(?:\b(?:and|or|with|for|to|of|in|on|at|by|from|via|through|around|after|before|without|including|especially)\b|[,:;])$/i;
 
+const weakLabelWords = new Set([
+  "assistant",
+  "bridge",
+  "cloud",
+  "console",
+  "copilot",
+  "engine",
+  "exchange",
+  "fabric",
+  "hub",
+  "layer",
+  "mesh",
+  "network",
+  "orchestrator",
+  "os",
+  "platform",
+  "portal",
+  "protocol",
+  "radar",
+  "scout",
+  "stack",
+  "studio",
+  "system",
+  "workspace",
+]);
+
+const jargonPhrases = [
+  "agentic",
+  "autonomous agents",
+  "backplane",
+  "composable",
+  "cross-modal",
+  "cutting-edge",
+  "ecosystem",
+  "embeddings",
+  "end-to-end",
+  "full-stack",
+  "interoperability",
+  "knowledge graph",
+  "latent",
+  "leverage",
+  "llm",
+  "middleware",
+  "multi-agent",
+  "ontology",
+  "orchestration",
+  "paradigm",
+  "pipeline",
+  "rag",
+  "schema",
+  "semantic",
+  "seamless",
+  "solutioning",
+  "synergy",
+  "taxonomy",
+  "tokenized",
+  "vectorized",
+  "workflow orchestration",
+];
+
+const genericSummaryPhrases = [
+  "next-generation",
+  "single pane of glass",
+  "thought partner",
+  "unlock value",
+  "streamline operations",
+  "transform workflows",
+];
+
+const allowedAcronyms = new Set([
+  "AI",
+  "API",
+  "B2B",
+  "B2C",
+  "CRM",
+  "EHR",
+  "EMR",
+  "ERP",
+  "GPS",
+  "HR",
+  "IoT",
+  "KPI",
+  "OCR",
+  "POS",
+  "ROI",
+  "SaaS",
+  "SDK",
+  "SMB",
+  "SQL",
+  "UI",
+  "UX",
+]);
+
+type IdeaTeaser = z.infer<typeof ideaTeaserResponseSchema>["ideas"][number];
+
+type IdeaTeaserReview = {
+  accepted: boolean;
+  feedback: string[];
+  reviewedIdeas: Array<{
+    idea: IdeaTeaser;
+    issues: string[];
+    score: number;
+  }>;
+  score: number;
+};
+
 function stringifyDetails(details: NodeDetails) {
   return [
     `Inspiration: ${details.inspiration.join("; ")}`,
@@ -168,6 +274,24 @@ function cleanPhrase(value: string) {
   return value.replace(/\s+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").trim();
 }
 
+function tokenizeWords(value: string) {
+  return cleanPhrase(value)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+function countPhraseHits(value: string, phrases: string[]) {
+  const normalized = cleanPhrase(value).toLowerCase();
+
+  return phrases.reduce((count, phrase) => count + (normalized.includes(phrase) ? 1 : 0), 0);
+}
+
+function countUncommonAcronyms(value: string) {
+  const acronyms = cleanPhrase(value).match(/\b[A-Z]{2,}\b/g) ?? [];
+  return acronyms.filter((token) => !allowedAcronyms.has(token)).length;
+}
+
 function fitWithinLimit(value: string, maxLength: number, sentence = false) {
   const normalized = sentence ? cleanSentence(value) : cleanPhrase(value);
 
@@ -202,6 +326,94 @@ function normalizeIdeaTeaserPayload(payload: z.infer<typeof ideaTeaserWireRespon
       edgeLabel: fitWithinLimit(idea.edgeLabel, 24),
       edgeExplanation: fitWithinLimit(idea.edgeExplanation, 180, true),
     })),
+  };
+}
+
+function reviewIdeaTeaser(idea: IdeaTeaser) {
+  const labelWords = tokenizeWords(idea.label);
+  const summaryWords = tokenizeWords(idea.summary);
+  const labelWeakWordCount = labelWords.filter((word) => weakLabelWords.has(word)).length;
+  const jargonHits = countPhraseHits(`${idea.label} ${idea.summary}`, jargonPhrases);
+  const genericHits = countPhraseHits(idea.summary, genericSummaryPhrases);
+  const uncommonAcronyms = countUncommonAcronyms(`${idea.label} ${idea.summary}`);
+  const hasPlainLanguageStructure =
+    /\b(for|helps?|lets|allows?|gives|used by|so that|instead of|reduces?|cuts?|speeds?\s+up)\b/i.test(idea.summary);
+  const mentionsConcreteOutcome =
+    /\b(avoid|book|buy|catch|coach|compare|cut|deliver|detect|draft|find|guide|hire|improve|match|monitor|pay|plan|predict|prevent|price|prioritize|rank|reduce|save|schedule|screen|sell|send|ship|spot|suggest|track|train|verify|warn)\b/i.test(
+      idea.summary,
+    );
+
+  const issues: string[] = [];
+
+  if (labelWords.length <= 4 && labelWeakWordCount >= Math.max(2, labelWords.length - 1)) {
+    issues.push("label feels abstract instead of naming a concrete product or service");
+  }
+
+  if (jargonHits >= 3 || uncommonAcronyms >= 2) {
+    issues.push("too much jargon or too many unexplained acronyms");
+  }
+
+  if (!hasPlainLanguageStructure) {
+    issues.push("summary does not clearly say who it helps or what it does");
+  }
+
+  if (!mentionsConcreteOutcome) {
+    issues.push("summary does not clearly state a practical user outcome");
+  }
+
+  if (summaryWords.length < 9) {
+    issues.push("summary is too compressed to explain the idea clearly");
+  }
+
+  if (genericHits >= 1) {
+    issues.push("summary relies on generic startup language");
+  }
+
+  const score = 10 - issues.length * 2 - jargonHits - uncommonAcronyms;
+
+  return {
+    idea,
+    issues,
+    score,
+  };
+}
+
+function reviewIdeaTeaserSet(payload: z.infer<typeof ideaTeaserResponseSchema>): IdeaTeaserReview {
+  const reviewedIdeas = payload.ideas.map(reviewIdeaTeaser);
+  const highQualityCount = reviewedIdeas.filter((item) => item.issues.length === 0).length;
+  const usableCount = reviewedIdeas.filter((item) => item.issues.length <= 1).length;
+  const totalIssues = reviewedIdeas.reduce((sum, item) => sum + item.issues.length, 0);
+  const score = reviewedIdeas.reduce((sum, item) => sum + item.score, 0) + highQualityCount * 3 + usableCount;
+
+  const feedback = reviewedIdeas.flatMap((item, index) =>
+    item.issues.map((issue) => `Idea ${index + 1} (${item.idea.label}): ${issue}.`),
+  );
+
+  return {
+    accepted: usableCount >= 3 && highQualityCount >= 2 && totalIssues <= payload.ideas.length + 1,
+    feedback,
+    reviewedIdeas,
+    score,
+  };
+}
+
+function selectBestIdeaTeaserPayload(payload: z.infer<typeof ideaTeaserResponseSchema>) {
+  const reviewed = payload.ideas.map((idea, index) => ({
+    idea,
+    index,
+    issues: reviewIdeaTeaser(idea).issues.length,
+  }));
+  const usableCount = reviewed.filter((item) => item.issues <= 1).length;
+  const desiredCount = Math.min(payload.ideas.length, Math.max(3, usableCount));
+
+  const selectedIndexes = reviewed
+    .sort((left, right) => left.issues - right.issues || left.idea.label.length - right.idea.label.length)
+    .slice(0, desiredCount)
+    .map((item) => item.index)
+    .sort((left, right) => left - right);
+
+  return {
+    ideas: selectedIndexes.map((index) => payload.ideas[index]),
   };
 }
 
@@ -241,6 +453,7 @@ function buildNodeDetailsPrompt({
     parentNotes,
     "Generate the full dossier for this single idea.",
     "Return concrete product, customer, market, and execution notes.",
+    "Keep every item understandable to a smart non-specialist after one read.",
     "Also return a strong cross-check query that would work well for similarity search.",
   ]
     .filter(Boolean)
@@ -250,10 +463,12 @@ function buildNodeDetailsPrompt({
 function getNodeDetailsInstructions() {
   return [
     "You are a product strategist fleshing out one startup idea into a concise dossier.",
-    "Be concrete and commercially literate.",
+    "Be concrete, commercially literate, and easy for a smart non-specialist to understand.",
+    "Use plain English. If a technical concept matters, explain it in everyday language.",
     "Each sentence-style item must be complete and must not end mid-phrase.",
     "Make the crosscheckQuery specific enough for prior-art and adjacent-solution lookup.",
     "Do not repeat the same point across sections unless it is essential.",
+    "Prefer user problems, workflows, and practical execution details over architecture jargon.",
   ].join(" ");
 }
 
@@ -379,6 +594,7 @@ export async function generateIdeaTeasers({
         "Generate up to 5 genuinely distinct follow-on business ideas.",
         "Do not produce UI concepts, graph concepts, or meta-tooling descriptions.",
         "Each label must read like a real venture direction or product concept.",
+        "Each summary must be understandable after one read by a smart non-specialist.",
       ]
         .filter(Boolean)
       .join("\n\n")
@@ -387,29 +603,64 @@ export async function generateIdeaTeasers({
         "Generate up to 5 distinct venture directions that could realistically be built from this seed.",
         "Do not describe the graph, the app, or the ideation process itself.",
         "Prefer concrete business ideas, differentiated offers, or go-to-market angles.",
+        "Each idea should be understandable after one read by a smart non-specialist.",
       ].join("\n\n");
 
-  const instructions = [
+  const baseInstructions = [
     "You are a startup strategist generating concrete business directions from a seed concept.",
-    "Return thoughtful, non-generic ideas.",
+    "Return thoughtful, non-generic ideas that are understandable to ordinary people, not only experts.",
     "Return teaser-level ideas only: label, short summary, relationship label, relationship explanation, and type.",
     "Do not generate detailed dossiers or category bullet lists in this step.",
     "The headings content should read like investment memo notes for that specific idea, not filler or UI commentary.",
     "Avoid repeating the seed verbatim in every label unless necessary.",
     "Avoid abstract labels like workspace, radar, bridge, scout, studio unless the concept truly requires them.",
+    "Prefer ideas with a clear user, clear pain point, and clear first product wedge.",
+    "Label the actual product or service, not the architecture behind it.",
+    "Use plain English. Avoid dense jargon, consultant language, and unexplained acronyms.",
+    "If a technical term is necessary, the summary must explain it in simple words.",
+    "Every summary should make clear who it helps, what it does, and what practical benefit it creates.",
     "Every summary and explanation must be complete and must not end mid-phrase.",
     "Respect these hard limits: label <= 64 characters, summary <= 240 characters, edgeLabel <= 24 characters, edgeExplanation <= 180 characters.",
-  ].join(" ");
+  ];
 
-  const parsed = await generateStructured({
-    name: "idea_teasers",
-    schema: ideaTeaserWireResponseSchema,
-    instructions,
-    input: prompt,
-    maxOutputTokens: 2600,
-  });
+  let bestPayload: z.infer<typeof ideaTeaserResponseSchema> | null = null;
+  let bestReview: IdeaTeaserReview | null = null;
+  let repairFeedback = "";
 
-  return ideaTeaserResponseSchema.parse(normalizeIdeaTeaserPayload(parsed));
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const instructions = [...baseInstructions, repairFeedback].filter(Boolean).join(" ");
+    const parsed = await generateStructured({
+      name: "idea_teasers",
+      schema: ideaTeaserWireResponseSchema,
+      instructions,
+      input: prompt,
+      maxOutputTokens: 2600,
+    });
+
+    const normalized = ideaTeaserResponseSchema.parse(normalizeIdeaTeaserPayload(parsed));
+    const review = reviewIdeaTeaserSet(normalized);
+
+    if (!bestReview || review.score > bestReview.score) {
+      bestPayload = normalized;
+      bestReview = review;
+    }
+
+    if (review.accepted) {
+      return normalized;
+    }
+
+    repairFeedback = [
+      "Revise the ideas to fix these problems from the previous attempt.",
+      ...review.feedback.slice(0, 8),
+      "Return clearer ideas with simpler labels, clearer user benefit, and less jargon.",
+    ].join(" ");
+  }
+
+  if (!bestPayload) {
+    throw new Error("OpenAI did not return any usable idea teasers.");
+  }
+
+  return selectBestIdeaTeaserPayload(bestPayload);
 }
 
 export async function generateNodeDetails({
