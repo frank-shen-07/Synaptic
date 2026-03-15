@@ -54,6 +54,8 @@ type Props = {
   resetViewVersion: number;
   mode3d: boolean;
   showSatellites: boolean;
+  focusedPath: Set<string>;
+  nodeNotes: Map<string, string>;
 };
 
 function hexToRgb(value: string): Rgb {
@@ -198,7 +200,7 @@ const SATELLITE_COLORS: Record<string, string> = {
   openQuestions: "#94a3b8", tensions: "#fb7185",
 };
 
-export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, resetViewVersion, mode3d, showSatellites }: Props) {
+export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, resetViewVersion, mode3d, showSatellites, focusedPath, nodeNotes }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const simRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
@@ -270,12 +272,15 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
       const s = nodeMap.get(edge.source), t = nodeMap.get(edge.target);
       if (!s || !t || s.x == null || s.y == null || t.x == null || t.y == null) return;
       const isNear = hovered && (hovered.id === s.id || hovered.id === t.id);
-      const ec = mixColor(resolveColor(s), resolveColor(t), 0.5);
+      const hasFocus = focusedPath.size > 0;
+      const inFocus = hasFocus && focusedPath.has(s.id) && focusedPath.has(t.id);
+      const dimmed = hasFocus && !inFocus;
+      const ec = inFocus ? "#63d1c4" : mixColor(resolveColor(s), resolveColor(t), 0.5);
       const ba = theme === "dark" ? 0.24 : 0.38, aa = theme === "dark" ? 0.68 : 0.82, ha = theme === "dark" ? 0.46 : 0.58;
       ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(t.x, t.y);
       edgeSegs.push({ x1: s.x, y1: s.y, x2: t.x, y2: t.y });
-      ctx.strokeStyle = withAlpha(ec, isNear ? aa : edge.highlighted ? ha : ba);
-      ctx.lineWidth = ((isNear ? 1.5 : 0.9) + edge.strength * 0.65) / k;
+      ctx.strokeStyle = dimmed ? "rgba(148,163,184,0.05)" : withAlpha(ec, inFocus ? 0.75 : isNear ? aa : edge.highlighted ? ha : ba);
+      ctx.lineWidth = ((inFocus ? 2 : isNear ? 1.5 : 0.9) + (inFocus ? 0 : edge.strength * 0.65)) / k;
       ctx.stroke();
     });
 
@@ -283,16 +288,32 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
       if (node.x == null || node.y == null) return;
       const color = resolveColor(node);
       const isHovered = hovered?.id === node.id, isSelected = node.id === selectedId;
+      const hasFocus = focusedPath.size > 0;
+      const inFocus = hasFocus && focusedPath.has(node.id);
+      const dimmed = hasFocus && !inFocus;
       const r = node.r * (isHovered ? 1.55 : 1);
-      ctx.globalAlpha = getNodeOpacity(node.record);
+
+      if (inFocus) {
+        ctx.globalAlpha = 0.12;
+        ctx.beginPath(); ctx.arc(node.x, node.y, r + 9 / k, 0, Math.PI * 2);
+        ctx.fillStyle = "#63d1c4"; ctx.fill();
+      }
+
+      ctx.globalAlpha = dimmed ? 0.1 : getNodeOpacity(node.record);
       ctx.beginPath(); ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = color; ctx.fill();
+      ctx.fillStyle = inFocus ? "#63d1c4" : color; ctx.fill();
       if (isSelected || isHovered) {
-        ctx.globalAlpha = 0.22;
+        ctx.globalAlpha = dimmed ? 0.05 : 0.22;
         ctx.beginPath(); ctx.arc(node.x, node.y, r + 5 / k, 0, Math.PI * 2);
         ctx.fillStyle = color; ctx.fill();
       }
       ctx.globalAlpha = 1;
+
+      // Note dot (amber) — only when not dimmed
+      if (!dimmed && nodeNotes.get(node.id)) {
+        ctx.beginPath(); ctx.arc((node.x ?? 0) + node.r - 1, (node.y ?? 0) - node.r + 1, Math.max(2, 3 / k), 0, Math.PI * 2);
+        ctx.fillStyle = "#fbbf24"; ctx.fill();
+      }
 
       // Satellite dots for detail sections
       if (showSatellites && (isHovered || isSelected || k > 0.8)) {
@@ -398,7 +419,14 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
       ctx.fillText("click to explore →", cx2, by + bh - botP);
       ctx.textAlign = "left";
     }
-  }, [edges, theme, showSatellites]);
+  }, [edges, theme, showSatellites, focusedPath, nodeNotes]);
+
+  useEffect(() => {
+    if (!mode3d) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(draw2d);
+    }
+  }, [focusedPath, nodeNotes, mode3d, draw2d]);
 
   // 3D setup
   const init3d = useCallback(() => {
@@ -427,7 +455,7 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
 
       const simNodes3d = nodes.map((record, i) => ({
         id: record.id, record, r: getNodeRadius(record),
-        x: (Math.random() - 0.5) * 180, y: (Math.random() - 0.5) * 180, z: (Math.random() - 0.5) * 180,
+        x: (Math.random() - 0.5) * 260, y: (Math.random() - 0.5) * 260, z: (Math.random() - 0.5) * 260,
         vx: 0, vy: 0, vz: 0,
       }));
 
@@ -480,15 +508,15 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
         // --- Label sprite: dark pill background, white text ---
-        const lfs = (n.record.depth === 0 ? 22 : 16) * dpr;
+        const lfs = (n.record.depth === 0 ? 18 : 13) * dpr;
         const lfw = n.record.depth === 0 ? "700" : "600";
-        const hPad = 14 * dpr, vPad = 9 * dpr;
+        const hPad = 10 * dpr, vPad = 6 * dpr;
         // Measure text on a scratch canvas
         const msc = document.createElement("canvas");
         const mctx = msc.getContext("2d")!;
         mctx.font = `${lfw} ${lfs}px system-ui, sans-serif`;
         let lbl = n.record.label;
-        const maxLblW = 240 * dpr;
+        const maxLblW = 180 * dpr;
         while (mctx.measureText(lbl).width > maxLblW && lbl.length > 1) lbl = lbl.slice(0, -1).trimEnd();
         if (lbl !== n.record.label) lbl += "\u2026";
         const textW = Math.min(mctx.measureText(lbl).width, maxLblW);
@@ -506,7 +534,7 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
         lctx.fillText(lbl, lcw / 2, lch / 2);
         const lt = new THREE.CanvasTexture(lc); lt.needsUpdate = true;
         const ls = new THREE.Sprite(new THREE.SpriteMaterial({ map: lt, transparent: true, depthTest: false }));
-        const lww = n.record.depth === 0 ? 44 : 32;
+        const lww = n.record.depth === 0 ? 30 : 22;
         ls.scale.set(lww, lww * lch / lcw, 1);
         pivot.add(ls);
         labelSprites.push(ls);
@@ -544,7 +572,7 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
           dlines.forEach((line, li) => dctx.fillText(line, dcw / 2, dVPad + li * lineH));
           const dt = new THREE.CanvasTexture(dc); dt.needsUpdate = true;
           const ds = new THREE.Sprite(new THREE.SpriteMaterial({ map: dt, transparent: true, depthTest: false }));
-          const dww = 36;
+          const dww = 32;
           ds.scale.set(dww, dww * dch / dcw, 1);
           ds.visible = false;
           pivot.add(ds);
@@ -561,7 +589,7 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
       let physicsFrame = 0;
 
       function tickPhysics() {
-        const alpha = 0.018, repulsion = 2500, linkDist = 130, linkStr = 0.28, centerF = 0.008, damping = 0.82;
+        const alpha = 0.018, repulsion = 4200, linkDist = 185, linkStr = 0.26, centerF = 0.0065, damping = 0.82;
         simNodes3d.forEach(n => { n.vx -= n.x * centerF; n.vy -= n.y * centerF; n.vz -= n.z * centerF; });
         for (let i = 0; i < simNodes3d.length; i++) {
           for (let j = i + 1; j < simNodes3d.length; j++) {
@@ -609,16 +637,52 @@ export function ForceGraph({ nodes, edges, selectedNodeId, onNodeClick, theme, r
         animFrame = requestAnimationFrame(animate);
         if (physicsFrame < 600) { tickPhysics(); physicsFrame++; }
         else if (Math.random() < 0.02) tickPhysics();
+
+        // Update focus dimming and note dots per frame
+        simNodes3d.forEach((n, i) => {
+          const mesh = meshes[i];
+          if (!mesh) return;
+          const hasFocus = focusedPath.size > 0;
+          const inFocus = !hasFocus || focusedPath.has(n.id);
+          const mat = mesh.material as import("three").MeshBasicMaterial;
+          if (hasFocus && focusedPath.has(n.id)) {
+            mat.color.setHex(0x63d1c4);
+            mat.opacity = 1;
+          } else if (hasFocus) {
+            mat.color.setHex(NODE_COLORS_HEX[n.record.type] ?? 0x94a3b8);
+            mat.opacity = 0.08;
+          } else {
+            mat.color.setHex(NODE_COLORS_HEX[n.record.type] ?? 0x94a3b8);
+            mat.opacity = getNodeOpacity(n.record);
+          }
+        });
+
         // Update label and description sprite positions to follow nodes
         simNodes3d.forEach((n, i) => {
           labelSprites[i].position.set(n.x, n.y + n.r + 7, n.z);
+          const hasFocus = focusedPath.size > 0;
+          const inFocus = hasFocus && focusedPath.has(n.id);
+          const isSelected = selectedIdRef.current === n.id;
+          const hasNote = Boolean(nodeNotes.get(n.id)?.trim());
+          const zoomedIn = camera.position.z < 220;
+          const showLabel = inFocus || isSelected || n.record.depth === 0 || zoomedIn;
+          const labelMat = labelSprites[i].material as import("three").SpriteMaterial;
+          labelSprites[i].visible = showLabel;
+          labelMat.opacity = showLabel
+            ? (inFocus || isSelected ? 1 : hasNote ? 0.95 : zoomedIn ? 0.72 : 0.56)
+            : 0;
         });
-        const showDesc = camera.position.z < 300;
+        const showDesc = camera.position.z < 230;
         descSprites.forEach((s, i) => {
           if (!s) return;
           const n = simNodes3d[i];
           s.position.set(n.x, n.y - n.r - 10, n.z);
-          s.visible = showDesc;
+          const hasFocus = focusedPath.size > 0;
+          const inFocus = hasFocus && focusedPath.has(n.id);
+          const isSelected = selectedIdRef.current === n.id;
+          s.visible = showDesc && (!hasFocus || inFocus || isSelected);
+          const descMat = s.material as import("three").SpriteMaterial;
+          descMat.opacity = isSelected ? 1 : inFocus ? 0.95 : 0.84;
         });
         if (!isDragging) autoRotY += 0.002;
         pivot.rotation.y = rotY + autoRotY;
