@@ -393,6 +393,8 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
   const [hydrationSnapshot, setHydrationSnapshot] = useState<{ nodeId: string; snapshot: string } | null>(null);
   const [resetViewVersion, setResetViewVersion] = useState(0);
   const [mode3d, setMode3d] = useState(false);
+  const [focusedPath, setFocusedPath] = useState<Set<string>>(new Set());
+  const [nodeNotes, setNodeNotes] = useState<Map<string, string>>(new Map());
   const [isPending, startTransition] = useTransition();
   const activeHydrationsRef = useRef(new Set<string>());
 
@@ -400,6 +402,28 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
     session.graph.nodes.find((node) => node.id === selectedNodeId) ??
     session.graph.nodes.find((node) => node.type === "seed") ??
     null;
+
+  function getNodePath(nodeId: string): Set<string> {
+    const path = new Set<string>([nodeId]);
+    let cur = nodeId;
+    while (true) {
+      const parentEdge = session.graph.edges.find((e) => e.target === cur);
+      if (!parentEdge) break;
+      path.add(parentEdge.source);
+      cur = parentEdge.source;
+    }
+    const queue = [nodeId];
+    while (queue.length > 0) {
+      const c = queue.shift()!;
+      session.graph.edges.forEach((e) => {
+        if (e.source === c && !path.has(e.target)) {
+          path.add(e.target);
+          queue.push(e.target);
+        }
+      });
+    }
+    return path;
+  }
 
   const handleNodeClick = useCallback((nodeId: string) => {
     setHydrationSnapshot(null);
@@ -791,6 +815,8 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
             resetViewVersion={resetViewVersion}
             mode3d={mode3d}
             showSatellites={false}
+            focusedPath={focusedPath}
+            nodeNotes={nodeNotes}
           />
         </div>
       </section>
@@ -988,6 +1014,76 @@ export function GraphWorkbench({ initialSession }: GraphWorkbenchProps) {
                 </p>
               </section>
             ) : null}
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <div
+                className="rounded-[1.5rem] border p-4"
+                style={{
+                  background: "var(--card-soft)",
+                  borderColor: "color-mix(in srgb, #fbbf24 52%, var(--line))",
+                  boxShadow: "0 0 0 1px color-mix(in srgb, #fbbf24 28%, transparent), 0 12px 26px color-mix(in srgb, #fbbf24 16%, transparent)",
+                }}
+              >
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground-soft)]">
+                  Your note
+                </p>
+                <textarea
+                  rows={3}
+                  placeholder="Add your thinking on this node..."
+                  value={nodeNotes.get(selectedNode.id) ?? ""}
+                  onChange={(e) => {
+                    setNodeNotes((prev) => {
+                      const next = new Map(prev);
+                      next.set(selectedNode.id, e.target.value);
+                      return next;
+                    });
+                  }}
+                  className="w-full resize-none rounded-xl border border-[color:var(--line)] bg-transparent px-3 py-2 text-sm leading-6 text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-soft)] focus:border-[color:var(--foreground-soft)]"
+                  style={{ fontFamily: "var(--font-body)" }}
+                />
+              </div>
+
+              <div
+                className="flex flex-col gap-3 rounded-[1.5rem] border p-4"
+                style={{
+                  background: "var(--card-soft)",
+                  borderColor: `color-mix(in srgb, ${nodeAccent} 58%, var(--line))`,
+                  boxShadow: `0 0 0 1px color-mix(in srgb, ${nodeAccent} 30%, transparent), 0 12px 26px color-mix(in srgb, ${nodeAccent} 18%, transparent)`,
+                }}
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--foreground-soft)]">
+                  Path focus
+                </p>
+                <p className="text-sm leading-6 text-[var(--foreground-muted)]">
+                  Highlight the chain from this node back to the seed and down to its deepest children.
+                </p>
+                <div className="mt-auto flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const isFocused = focusedPath.has(selectedNode.id);
+                      setFocusedPath(isFocused ? new Set() : getNodePath(selectedNode.id));
+                    }}
+                    className="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition"
+                    style={
+                      focusedPath.has(selectedNode.id)
+                        ? { borderColor: nodeAccent, color: nodeAccent, background: `color-mix(in srgb, ${nodeAccent} 12%, transparent)` }
+                        : { borderColor: "var(--line)", color: "var(--foreground)", background: "var(--button-secondary)" }
+                    }
+                  >
+                    {focusedPath.has(selectedNode.id) ? "Unfocus path" : "Highlight this path"}
+                  </button>
+                  {focusedPath.size > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setFocusedPath(new Set())}
+                      className="inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] bg-[var(--button-secondary)] px-4 py-2 text-sm font-semibold text-[var(--foreground-muted)] transition hover:bg-[var(--button-secondary-hover)]"
+                    >
+                      Show all
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
 
             <div className="mt-8 grid gap-4 md:grid-cols-2">
               {detailSections.map((section) => {
