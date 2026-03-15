@@ -232,9 +232,9 @@ export function LandingPageShell({ fontClassName, workspaceHref }: LandingPageSh
         }}
       >
         <div className="mx-auto flex w-full max-w-[1200px] items-center justify-between gap-4">
-          <Link href="/" className="flex items-center gap-2" style={{ fontFamily: "var(--font-landing-display)" }}>
-            <span className="inline-block h-[7px] w-[7px] rounded-full opacity-35" style={{ background: "var(--landing-text)" }} />
-            <span className="text-[1.3rem] tracking-[-0.02em]">Synaptic</span>
+          <Link href="/" className="flex items-center gap-4" style={{ fontFamily: "var(--font-landing-display)" }}>
+            <img src="/brand/favicon.png" alt="" aria-hidden="true" className="h-9 w-9 object-contain opacity-90" />
+            <span className="text-[2.1rem] leading-none tracking-[-0.03em]">Synaptic</span>
           </Link>
 
           <div className="hidden items-center gap-8 md:flex" style={{ fontFamily: "var(--font-landing-mono)", color: "var(--landing-text-muted)" }}>
@@ -525,7 +525,10 @@ export function LandingPageShell({ fontClassName, workspaceHref }: LandingPageSh
         className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-between gap-4 border-t px-6 py-8 md:px-10"
         style={{ borderColor: "var(--landing-line)" }}
       >
-        <p style={{ fontFamily: "var(--font-landing-display)", fontSize: "1.1rem" }}>Synaptic</p>
+        <div className="flex items-center gap-4" style={{ fontFamily: "var(--font-landing-display)" }}>
+          <img src="/brand/favicon.png" alt="" aria-hidden="true" className="h-8 w-8 object-contain opacity-90" />
+          <p style={{ fontSize: "1.7rem", lineHeight: 1 }}>Synaptic</p>
+        </div>
         <p className="text-[0.62rem] uppercase tracking-[0.18em]" style={{ color: "var(--landing-text-muted)", fontFamily: "var(--font-landing-mono)" }}>
           Idea exploration, structured.
         </p>

@@ -17,6 +17,14 @@ export const metadata: Metadata = {
   title: "Synaptic",
   description:
     "Seed an idea, generate a structured thought graph, stress-test it, and export a one-pager.",
+  icons: {
+    icon: [
+      { url: "/favicon.png", type: "image/png" },
+      { url: "/brand/favicon.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.png",
+    apple: "/brand/favicon.png",
+  },
 };
 
 export default function RootLayout({

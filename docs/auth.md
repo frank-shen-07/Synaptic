@@ -16,12 +16,15 @@ SUPABASE_URL=https://<project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
 SUPABASE_SERVICE_ROLE_KEY=<service role key>
+SITE_URL=http://localhost:3000
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ```
 
 Use:
 
 - `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in the browser
 - `SUPABASE_SERVICE_ROLE_KEY` only on the server
+- `SITE_URL` / `NEXT_PUBLIC_SITE_URL` to force the public app origin behind proxies like Render
 
 ## Migrations
 
